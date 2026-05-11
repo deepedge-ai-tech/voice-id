@@ -7,9 +7,9 @@ recognition against an enrolled voiceprint, and displays real-time status
 in the terminal.
 
 Usage:
-    uv run python scripts/realtime_monitor.py
-    uv run python scripts/realtime_monitor.py --voiceprint asset/john/voice_best.pkl
-    uv run python scripts/realtime_monitor.py --window-secs 3.0 --threshold 0.50
+    uv run python -m wespeaker.realtime_monitor
+    uv run python -m wespeaker.realtime_monitor --voiceprint asset/john/voice_best.pkl
+    uv run python -m wespeaker.realtime_monitor --window-secs 3.0 --threshold 0.50
 """
 
 import argparse
@@ -19,7 +19,7 @@ from pathlib import Path
 
 import numpy as np
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from . import wespeaker
 
 # --------------------------------------------------------------------------- #
 #  Ring Buffer
@@ -199,10 +199,8 @@ class RealtimeMonitor:
         import torch
         import torch.nn.functional as F
 
-        from src.wespeaker.wespeaker import _extract_embedding
-
         waveform = torch.from_numpy(audio)
-        emb = F.normalize(_extract_embedding(self.model, waveform), dim=0)
+        emb = F.normalize(wespeaker._extract_embedding(self.model, waveform), dim=0)
         return float(torch.dot(emb, self.voiceprint).clamp(-1.0, 1.0).item())
 
     def _format_display(self, score: float | None, rms: float, elapsed: float) -> str:
@@ -290,8 +288,6 @@ def main() -> None:
     import torch
     import torch.nn.functional as F
 
-    from src.wespeaker.wespeaker import WespeakerClient
-
     parser = argparse.ArgumentParser(description="WeSpeaker 实时声纹监控 — 麦克风实时识别")
     parser.add_argument(
         "--voiceprint",
@@ -336,7 +332,7 @@ def main() -> None:
     voiceprint = F.normalize(torch.from_numpy(np.asarray(vp_data, dtype=np.float32)), dim=0)
 
     # Initialize model
-    client = WespeakerClient(
+    client = wespeaker.WespeakerClient(
         model_path=args.model_path, device=args.device, enable_augmentation=False
     )
     client._ensure_model()
