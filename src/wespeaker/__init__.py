@@ -1,5 +1,9 @@
 """WeSpeaker 声纹识别工具。"""
 
+from .best import (
+    BestConfig,
+    WespeakerBest,
+)
 from .wespeaker import (
     WespeakerClient,
     _crop_verify,
@@ -12,6 +16,8 @@ from .wespeaker import (
 
 __all__ = [
     "WespeakerClient",
+    "WespeakerBest",
+    "BestConfig",
     "_crop_verify",
     "_estimate_snr",
     "_extract_embedding",
