@@ -114,7 +114,7 @@ class AudioCapture:
             blocksize=1024,  # ~64ms blocks at 16kHz
         )
 
-    def _callback(self, indata, frames, time_info, status) -> None:
+    def _callback(self, indata: np.ndarray, frames: int, time_info, status) -> None:
         """sounddevice callback — runs on audio thread."""
         if status:
             pass  # status flags like overflow, underflow
@@ -130,8 +130,9 @@ class AudioCapture:
         self.start()
         return self
 
-    def __exit__(self, *args) -> None:
+    def __exit__(self, exc_type, exc_val, exc_tb) -> bool:
         self.stop()
+        return False
 
 
 # --------------------------------------------------------------------------- #
@@ -233,7 +234,7 @@ class RealtimeMonitor:
         print(f"  采样率: {self.sample_rate} Hz")
         print(f"  窗口: {self.window_secs}s, 步长: {self.step_secs}s")
         print(f"  阈值: {self.threshold}")
-        print(f"  缓冲区: {int(self.sample_rate * 60)} 样本 (ring buffer)")
+        print(f"  缓冲区: {int(self.sample_rate * self.buffer_secs)} 样本 ({self.buffer_secs:.0f}s ring buffer)")
         print("=" * 60)
         print("  按 Ctrl+C 停止")
         print("=" * 60)
