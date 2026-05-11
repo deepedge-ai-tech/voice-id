@@ -174,6 +174,7 @@ class RealtimeMonitor:
         self.device = device
         self.window_secs = window_secs
         self.step_secs = step_secs
+        self.buffer_secs = buffer_secs
         self.threshold = threshold
         self.rms_threshold = rms_threshold
         self.sample_rate = sample_rate
