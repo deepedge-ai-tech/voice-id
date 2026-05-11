@@ -1,0 +1,13 @@
+[project]
+name = "wespeaker"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "audiomentations>=0.43.1",
+    "numpy>=2.4.4",
+    "pyannote-audio>=4.0.4",
+    "torch>=2.11.0",
+    "torchaudio>=2.11.0",
+]

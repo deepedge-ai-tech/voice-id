@@ -1,0 +1,33 @@
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Model files
+models/
+
+# Pickle files
+*.pkl
+
+# Audio files
+*.wav
+*.aif
+*.aiff
+*.m4a
+*.mp3
+*.ogg
+
+# Experiment logs
+experiment_log/
+
+# Local files
+.python-version
+main.py
+record_script.md
+test_script.md
