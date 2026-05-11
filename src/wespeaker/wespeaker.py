@@ -139,6 +139,89 @@ class _NoiseAugmentor:
 
 
 # --------------------------------------------------------------------------- #
+#  SNR 估计 & VAD
+# --------------------------------------------------------------------------- #
+
+def _estimate_snr(waveform: torch.Tensor, sample_rate: int = 16000, frame_ms: int = 25, hop_ms: int = 10) -> float:
+    """估计音频片段的信噪比（dB）。
+
+    将信号分帧，以能量最低的 10% 帧作为噪声估计，
+    其余帧的平均能量与噪声能量之比即为 SNR。
+    """
+    frame_len = int(frame_ms / 1000 * sample_rate)
+    hop_len = int(hop_ms / 1000 * sample_rate)
+    if frame_len < 1:
+        frame_len = 160
+        hop_len = 80
+
+    frames = []
+    for start in range(0, len(waveform) - frame_len + 1, hop_len):
+        seg = waveform[start:start + frame_len]
+        energy = (seg ** 2).mean().item()
+        if energy > 1e-10:
+            frames.append(energy)
+
+    if not frames:
+        return 0.0
+
+    frames.sort()
+    n_noise = max(1, len(frames) // 10)
+    noise_energy = np.mean(frames[:n_noise])
+    signal_energy = np.mean(frames[n_noise:])
+
+    if noise_energy < 1e-10:
+        return 30.0  # cap
+    return round(10 * np.log10(signal_energy / noise_energy), 2)
+
+
+def _vad_segments(
+    waveform: torch.Tensor, rms_threshold: float = 0.005,
+    min_duration_ms: int = 100, sample_rate: int = 16000,
+) -> list[torch.Tensor]:
+    """基于 RMS 能量的语音活动检测，返回有语音的片段列表。
+
+    使用自适应阈值：以 RMS 的 25 分位数作为噪声底噪估计，
+    阈值 = noise_floor * adaptive_factor（默认 2.0 倍）。
+    如果计算出的阈值低于固定下限，则使用固定下限。
+    """
+    frame_len = int(0.02 * sample_rate)  # 20ms
+    hop_len = int(0.01 * sample_rate)    # 10ms
+    min_samples = int(min_duration_ms / 1000 * sample_rate)
+
+    rms_values = []
+    starts = []
+    for start in range(0, len(waveform) - frame_len + 1, hop_len):
+        seg = waveform[start:start + frame_len]
+        rms = float(torch.sqrt((seg ** 2).mean()))
+        rms_values.append(rms)
+        starts.append(start)
+
+    if not rms_values:
+        return [waveform]
+
+    # 自适应阈值：25 分位数 * 2.0，不低于固定下限
+    sorted_rms = sorted(rms_values)
+    noise_floor = sorted_rms[max(0, len(sorted_rms) // 4)]
+    adaptive_threshold = max(noise_floor * 2.0, rms_threshold)
+
+    # 合并连续的高能量帧
+    segments: list[torch.Tensor] = []
+    in_speech = False
+    seg_start = 0
+    for i, rms in enumerate(rms_values):
+        if rms >= adaptive_threshold and not in_speech:
+            in_speech = True
+            seg_start = starts[i]
+        elif (rms < adaptive_threshold or i == len(rms_values) - 1) and in_speech:
+            in_speech = False
+            seg_end = starts[i] + frame_len
+            if seg_end - seg_start >= min_samples:
+                segments.append(waveform[seg_start:seg_end])
+
+    return segments if segments else [waveform]
+
+
+# --------------------------------------------------------------------------- #
 #  主类
 # --------------------------------------------------------------------------- #
 
@@ -159,11 +242,15 @@ class WespeakerClient:
     augment_ratio: float = 0.6
     noise_dir: str = ""
     sample_rate: int = 16000
+    enable_snr_weighting: bool = True  # 注册时按 SNR 加权
 
     # ---- 识别 ----
-    sim_threshold: float = 0.75
-    verify_crop_mode: str = "tail_window"  # tail_window / head_window / full_utterance
+    sim_threshold: float = 0.55
+    verify_crop_mode: str = "full_utterance"  # full_utterance / tail_window / head_window
     verify_window_secs: float = 1.0
+    verify_buffer_keep_secs: float = 8.0  # 验证 buffer 最大保留时长
+    enable_vad: bool = True  # 识别时启用 VAD 去静音
+    vad_rms_threshold: float = 0.005  # VAD 能量阈值
 
     # ---- 内部 ----
     _model: Optional[torch.nn.Module] = field(init=False, default=None, repr=False)
@@ -201,8 +288,21 @@ class WespeakerClient:
             emb = _extract_embedding(self._model, t)
             embeddings.append(emb)
 
-        # 均值 + 归一化
-        mean_emb = F.normalize(torch.stack(embeddings, dim=0).mean(dim=0), dim=0)
+        # 均值 + 归一化（可选 SNR 加权）
+        if self.enable_snr_weighting:
+            snr_values = [
+                _estimate_snr(torch.from_numpy(seg), sample_rate=self.sample_rate)
+                for seg in segments
+            ]
+            weights = torch.tensor([max(s, 0.0) for s in snr_values], dtype=torch.float32)
+            if weights.sum() > 0:
+                weights = weights / weights.sum()
+                stacked = torch.stack(embeddings, dim=0)
+                mean_emb = F.normalize((stacked * weights.unsqueeze(1)).sum(dim=0), dim=0)
+            else:
+                mean_emb = F.normalize(torch.stack(embeddings, dim=0).mean(dim=0), dim=0)
+        else:
+            mean_emb = F.normalize(torch.stack(embeddings, dim=0).mean(dim=0), dim=0)
 
         # 保存
         out = Path(pk_path).expanduser()
@@ -230,9 +330,24 @@ class WespeakerClient:
         with open(pk_path, "rb") as f:
             ref = F.normalize(torch.from_numpy(np.asarray(pickle.load(f), dtype=np.float32)), dim=0)
 
-        # 加载音频 + 裁剪
+        # 加载音频 + 限制长度 + 裁剪
         waveform = _load_audio(audio_path, self.sample_rate)
-        pcm = _crop_verify(waveform, self.verify_crop_mode, self.verify_window_secs, self.sample_rate)
+        max_samples = int(self.verify_buffer_keep_secs * self.sample_rate)
+        if waveform.numel() > max_samples:
+            if self.verify_crop_mode == "head_window":
+                waveform = waveform[:max_samples]
+            else:
+                waveform = waveform[-max_samples:]
+
+        # VAD 去静音/去纯噪声
+        if self.enable_vad and self.verify_crop_mode == "full_utterance":
+            speech_segs = _vad_segments(waveform, rms_threshold=self.vad_rms_threshold, sample_rate=self.sample_rate)
+            if speech_segs and len(speech_segs) > 0:
+                pcm = torch.cat(speech_segs)
+            else:
+                pcm = waveform
+        else:
+            pcm = _crop_verify(waveform, self.verify_crop_mode, self.verify_window_secs, self.sample_rate)
         if pcm.numel() == 0:
             return {"is_recognized": False, "confidence": 0.0, "error": "音频太短"}
 
@@ -250,6 +365,44 @@ class WespeakerClient:
     # ------------------------------------------------------------------ #
     #  内部
     # ------------------------------------------------------------------ #
+
+    def enroll_mixed(self, clean_paths: list[str], noise_paths: list[str], pk_path: str) -> dict:
+        """混合注册：结合 clean 和 noisy 音频生成声纹。"""
+        self._ensure_model()
+        all_segments: list[torch.Tensor] = []
+        seg_len = int(self.enrollment_segment_secs * self.sample_rate)
+
+        for path in clean_paths + noise_paths:
+            if not Path(path).is_file():
+                continue
+            waveform = _load_audio(path, self.sample_rate)
+            if waveform.numel() < seg_len:
+                continue
+            for i in range(len(waveform) // seg_len):
+                all_segments.append(waveform[i * seg_len:(i + 1) * seg_len])
+
+        if not all_segments:
+            return {"ok": False, "error": "无有效音频片段"}
+
+        embeddings = [_extract_embedding(self._model, seg) for seg in all_segments]
+
+        if self.enable_snr_weighting:
+            snr_values = [_estimate_snr(seg, sample_rate=self.sample_rate) for seg in all_segments]
+            weights = torch.tensor([max(s, 0.0) for s in snr_values], dtype=torch.float32)
+            if weights.sum() > 0:
+                weights = weights / weights.sum()
+                mean_emb = F.normalize((torch.stack(embeddings, dim=0) * weights.unsqueeze(1)).sum(dim=0), dim=0)
+            else:
+                mean_emb = F.normalize(torch.stack(embeddings, dim=0).mean(dim=0), dim=0)
+        else:
+            mean_emb = F.normalize(torch.stack(embeddings, dim=0).mean(dim=0), dim=0)
+
+        out = Path(pk_path).expanduser()
+        out.parent.mkdir(parents=True, exist_ok=True)
+        with open(out, "wb") as f:
+            pickle.dump(mean_emb.cpu().numpy(), f)
+
+        return {"ok": True, "num_segments": len(all_segments), "pk_path": str(out.resolve())}
 
     def _ensure_model(self) -> None:
         if self._model is None:

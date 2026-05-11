@@ -36,6 +36,9 @@ wespeaker/
 │       ├── conftest.py           # 共享 fixtures
 │       └── test_wespeaker.py     # 核心功能测试
 ├── scripts/                      # 可执行脚本
+│   ├── best_recognition.py       # 最佳配置注册与识别（multi-SNR 噪声注入）
+│   ├── experiment_noise_optimization.py    # 四种优化方案对比实验
+│   ├── experiment_train_noise_injection.py # 训练阶段噪声注入实验
 │   ├── split_registration.py     # 按静音间隔切分注册音频
 │   └── test_sliding_window.py    # 滑动窗口对比测试
 ├── docs/                         # 文档
@@ -90,7 +93,27 @@ uv run python scripts/split_registration.py asset/john/注册.aif asset/john/reg
 
 # 滑动窗口测试
 uv run python scripts/test_sliding_window.py
+
+# 最佳配置注册与识别
+uv run python scripts/best_recognition.py enroll \
+    --clean asset/john/registration_segments/ \
+    --noise asset/john/test_noise_segments/嘈杂环境测试.m4a \
+    --output asset/john/voice_best.pkl
+uv run python scripts/best_recognition.py recognize \
+    --audio asset/john/test_clean_segments/安静环境测试测试.m4a \
+    --voiceprint asset/john/voice_best.pkl
 ```
+
+## 最佳配置（基于实验结果）
+
+| 参数 | 值 | 来源 |
+|------|------|------|
+| sim_threshold | **0.55** | 动态阈值分析 — clean 通过率 98.3% |
+| verify_crop_mode | **full_utterance** | full utterance 得分始终高于滑动窗口 |
+| verify_buffer_keep_secs | **60.0** | 不截断，使用完整音频 |
+| enable_vad | **False** | 实验表明完整音频得分高于 VAD 去静音后 |
+| 注册增强 | **multi-SNR 真实噪声注入** | 最优方案 — noisy +0.058, clean -0.038 |
+| SNR 级别 | 20, 15, 10, 5, 0 dB | 多级别覆盖不同噪声强度 |
 
 ## 核心 API
 

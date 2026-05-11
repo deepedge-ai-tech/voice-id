@@ -78,3 +78,55 @@ class TestWespeakerClient:
         result = client.recognize("/tmp/test_audio.wav", "/nonexistent.pkl")
         assert result["is_recognized"] is False
         assert "声纹文件不存在" in result["error"]
+
+
+class TestVerifyBufferKeepSecs:
+    """测试 verify_buffer_keep_secs 截断逻辑。"""
+
+    def test_default_verify_buffer_keep_secs_should_be_8(self):
+        """测试：默认 buffer 保留时长应为 8.0 秒。"""
+        client = WespeakerClient()
+        assert client.verify_buffer_keep_secs == 8.0
+
+    def test_default_verify_crop_mode_should_be_full_utterance(self):
+        """测试：默认裁剪模式应为 full_utterance。"""
+        client = WespeakerClient()
+        assert client.verify_crop_mode == "full_utterance"
+
+    def test_default_sim_threshold_should_be_055(self):
+        """测试：默认相似度阈值应为 0.55。"""
+        client = WespeakerClient()
+        assert client.sim_threshold == 0.55
+
+
+class TestEnrollMixed:
+    """测试混合注册功能。"""
+
+    def test_enroll_mixed_with_nonexistent_files_should_fail(self, client):
+        """测试：所有文件都不存在时应返回错误。"""
+        result = client.enroll_mixed([], [], "/tmp/mixed_test.pkl")
+        assert result["ok"] is False
+        assert "无有效音频片段" in result["error"]
+
+    def test_enroll_mixed_creates_valid_pickle(self, client):
+        """测试：混合注册应生成有效的 pickle 文件。"""
+        import soundfile as sf
+        import numpy as np
+        import os
+
+        # Create test audio files
+        sf.write("/tmp/clean_test.wav", np.zeros(16000), 16000)  # 1s
+        sf.write("/tmp/noisy_test.wav", np.zeros(32000), 16000)  # 2s
+
+        if os.path.exists("/tmp/mixed_test.pkl"):
+            os.remove("/tmp/mixed_test.pkl")
+
+        result = client.enroll_mixed(["/tmp/clean_test.wav"], ["/tmp/noisy_test.wav"], "/tmp/mixed_test.pkl")
+        assert result["ok"] is True
+        assert result["num_segments"] == 3  # 1 + 2 segments
+        assert os.path.exists("/tmp/mixed_test.pkl")
+
+        # Verify the pickle file contains a valid embedding
+        with open("/tmp/mixed_test.pkl", "rb") as f:
+            emb = np.asarray(pickle.load(f))
+        assert emb.shape == (256,)  # 256-dimensional embedding
