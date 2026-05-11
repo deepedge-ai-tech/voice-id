@@ -13,7 +13,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from wespeaker import WespeakerClient, _load_audio, _extract_embedding
+from src.wespeaker.wespeaker import WespeakerClient, _load_audio, _extract_embedding
 
 
 def enroll_segments(segment_dir, client):

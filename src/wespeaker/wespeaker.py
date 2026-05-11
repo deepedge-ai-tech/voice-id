@@ -232,7 +232,7 @@ class WespeakerClient:
 
         # 加载音频 + 裁剪
         waveform = _load_audio(audio_path, self.sample_rate)
-        pcm = self._crop_verify(waveform)
+        pcm = _crop_verify(waveform, self.verify_crop_mode, self.verify_window_secs, self.sample_rate)
         if pcm.numel() == 0:
             return {"is_recognized": False, "confidence": 0.0, "error": "音频太短"}
 
@@ -264,15 +264,19 @@ class WespeakerClient:
             )
         return self._aug
 
-    def _crop_verify(self, waveform: torch.Tensor) -> torch.Tensor:
-        mode = self.verify_crop_mode.lower()
-        window = int(self.verify_window_secs * self.sample_rate)
-        if mode == "full_utterance":
-            return waveform
-        if mode == "head_window":
-            return waveform[:window]
-        # tail_window (default)
-        return waveform[-window:] if waveform.numel() > window else waveform
+def _crop_verify(
+    waveform: torch.Tensor, mode: str, window_secs: float, sample_rate: int
+) -> torch.Tensor:
+    """裁剪音频用于验证。"""
+    mode = mode.lower()
+    window = int(window_secs * sample_rate)
+    if mode == "full_utterance":
+        return waveform
+    if mode == "head_window":
+        return waveform[:window]
+    return waveform[-window:] if waveform.numel() > window else waveform
+
+
 
 
 # --------------------------------------------------------------------------- #

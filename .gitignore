@@ -31,3 +31,15 @@ experiment_log/
 main.py
 record_script.md
 test_script.md
+
+# Coverage
+htmlcov/
+.coverage
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
