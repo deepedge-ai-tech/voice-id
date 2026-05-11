@@ -234,7 +234,9 @@ class RealtimeMonitor:
         print(f"  采样率: {self.sample_rate} Hz")
         print(f"  窗口: {self.window_secs}s, 步长: {self.step_secs}s")
         print(f"  阈值: {self.threshold}")
-        print(f"  缓冲区: {int(self.sample_rate * self.buffer_secs)} 样本 ({self.buffer_secs:.0f}s ring buffer)")
+        print(
+            f"  缓冲区: {int(self.sample_rate * self.buffer_secs)} 样本 ({self.buffer_secs:.0f}s ring buffer)"
+        )
         print("=" * 60)
         print("  按 Ctrl+C 停止")
         print("=" * 60)

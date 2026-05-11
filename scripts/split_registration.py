@@ -15,10 +15,13 @@ import numpy as np
 import soundfile as sf
 
 
-def find_silence_gaps(samples: np.ndarray, sample_rate: int,
-                      rms_threshold: float = 0.002,
-                      min_gap_duration: float = 0.3,
-                      window_duration: float = 0.1) -> list[tuple[float, float]]:
+def find_silence_gaps(
+    samples: np.ndarray,
+    sample_rate: int,
+    rms_threshold: float = 0.002,
+    min_gap_duration: float = 0.3,
+    window_duration: float = 0.1,
+) -> list[tuple[float, float]]:
     """
     基于 RMS 能量检测静音间隔。
 
@@ -62,10 +65,15 @@ def find_silence_gaps(samples: np.ndarray, sample_rate: int,
     return gaps
 
 
-def split_by_gaps(samples: np.ndarray, sample_rate: int,
-                  gaps: list[tuple[float, float]],
-                  output_dir: str, speaker_id: str, scene: str,
-                  content_type: str = "free") -> list[str]:
+def split_by_gaps(
+    samples: np.ndarray,
+    sample_rate: int,
+    gaps: list[tuple[float, float]],
+    output_dir: str,
+    speaker_id: str,
+    scene: str,
+    content_type: str = "free",
+) -> list[str]:
     """
     按静音间隔切分音频，并按规范命名保存。
 
@@ -124,9 +132,11 @@ def split_by_gaps(samples: np.ndarray, sample_rate: int,
         else:
             out_sr = sample_rate
 
-        sf.write(filepath, segment, out_sr, subtype='PCM_16')
+        sf.write(filepath, segment, out_sr, subtype="PCM_16")
 
-        print(f"  [{idx:02d}] {start_time:6.2f}s - {end_time:6.2f}s ({duration:5.2f}s) → {filename}")
+        print(
+            f"  [{idx:02d}] {start_time:6.2f}s - {end_time:6.2f}s ({duration:5.2f}s) → {filename}"
+        )
         saved_files.append(str(filepath))
 
     return saved_files
@@ -137,18 +147,26 @@ def main():
     parser.add_argument("input_audio", help="输入音频文件路径")
     parser.add_argument("output_dir", default="asset/john/registration_segments", help="输出目录")
     parser.add_argument("--speaker", default="S01", help="说话人 ID (默认 S01)")
-    parser.add_argument("--scene", default="clean",
-                       choices=["clean", "aec_distorted", "cross_talk"],
-                       help="场景标签 (默认 clean)")
-    parser.add_argument("--type", dest="content_type", default="free",
-                       choices=["fixed", "free"],
-                       help="内容类型 (默认 free)")
-    parser.add_argument("--threshold", type=float, default=0.002,
-                       help="RMS 静音阈值 (默认 0.002)")
-    parser.add_argument("--min-gap", type=float, default=0.3,
-                       help="最小静音间隔时长，单位秒 (默认 0.3)")
-    parser.add_argument("--expected-segments", type=int, default=None,
-                       help="期望的片段数量（用于验证）")
+    parser.add_argument(
+        "--scene",
+        default="clean",
+        choices=["clean", "aec_distorted", "cross_talk"],
+        help="场景标签 (默认 clean)",
+    )
+    parser.add_argument(
+        "--type",
+        dest="content_type",
+        default="free",
+        choices=["fixed", "free"],
+        help="内容类型 (默认 free)",
+    )
+    parser.add_argument("--threshold", type=float, default=0.002, help="RMS 静音阈值 (默认 0.002)")
+    parser.add_argument(
+        "--min-gap", type=float, default=0.3, help="最小静音间隔时长，单位秒 (默认 0.3)"
+    )
+    parser.add_argument(
+        "--expected-segments", type=int, default=None, help="期望的片段数量（用于验证）"
+    )
 
     args = parser.parse_args()
 
@@ -164,18 +182,14 @@ def main():
     # 检测静音间隔
     print("检测静音间隔...")
     gaps = find_silence_gaps(
-        samples, sample_rate,
-        rms_threshold=args.threshold,
-        min_gap_duration=args.min_gap
+        samples, sample_rate, rms_threshold=args.threshold, min_gap_duration=args.min_gap
     )
 
     if not gaps:
         print("未检测到足够的静音间隔，尝试降低阈值...")
         for t in [0.001, 0.0005, 0.0002]:
             gaps = find_silence_gaps(
-                samples, sample_rate,
-                rms_threshold=t,
-                min_gap_duration=args.min_gap
+                samples, sample_rate, rms_threshold=t, min_gap_duration=args.min_gap
             )
             if gaps:
                 print(f"使用阈值 {t} 检测到 {len(gaps)} 个间隔")
@@ -184,8 +198,7 @@ def main():
     # 切分并保存
     print(f"\n切分音频到: {args.output_dir}")
     saved_files = split_by_gaps(
-        samples, sample_rate, gaps,
-        args.output_dir, args.speaker, args.scene, args.content_type
+        samples, sample_rate, gaps, args.output_dir, args.speaker, args.scene, args.content_type
     )
 
     print(f"\n完成! 共保存 {len(saved_files)} 个文件")

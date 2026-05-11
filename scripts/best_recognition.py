@@ -31,7 +31,6 @@ import torch.nn.functional as F
 from src.wespeaker import BestConfig, WespeakerBest
 from src.wespeaker.wespeaker import _extract_embedding, _load_audio
 
-
 # --------------------------------------------------------------------------- #
 #  滑动窗口诊断工具（保留在脚本中，不属于核心库）
 # --------------------------------------------------------------------------- #
@@ -150,11 +149,15 @@ def main() -> None:
         ref = F.normalize(torch.from_numpy(ref_data.astype(np.float32)), dim=0)
 
         window_results, full_score = sliding_window_test(
-            recognizer, args.audio, ref,
-            window_secs=args.window, step_secs=args.step,
+            recognizer,
+            args.audio,
+            ref,
+            window_secs=args.window,
+            step_secs=args.step,
         )
         print_sliding_results(
-            window_results, full_score,
+            window_results,
+            full_score,
             threshold=recognizer.config.sim_threshold,
             label=f"滑动窗口测试: {args.audio}",
         )

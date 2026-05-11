@@ -40,7 +40,7 @@ def enroll_with_config(client: WespeakerClient, segment_dir: str) -> torch.Tenso
             continue
         # 使用 1s 片段
         for i in range(len(waveform) // seg_len):
-            seg = waveform[i * seg_len:(i + 1) * seg_len]
+            seg = waveform[i * seg_len : (i + 1) * seg_len]
             segments.append(seg)
             emb = _extract_embedding(client._model, seg)
             embeddings.append(emb)
@@ -59,14 +59,21 @@ def enroll_with_config(client: WespeakerClient, segment_dir: str) -> torch.Tenso
     return ref, len(embeddings)
 
 
-def sliding_window_test(client: WespeakerClient, audio_path: str, reference: torch.Tensor,
-                        window_secs: float = 2.0, step_secs: float = 0.5) -> tuple[list[dict], float]:
+def sliding_window_test(
+    client: WespeakerClient,
+    audio_path: str,
+    reference: torch.Tensor,
+    window_secs: float = 2.0,
+    step_secs: float = 0.5,
+) -> tuple[list[dict], float]:
     """滑动窗口测试 + full utterance。"""
     waveform = _load_audio(audio_path, client.sample_rate)
 
     # VAD 处理
     if client.enable_vad and client.verify_crop_mode == "full_utterance":
-        speech_segs = _vad_segments(waveform, rms_threshold=client.vad_rms_threshold, sample_rate=client.sample_rate)
+        speech_segs = _vad_segments(
+            waveform, rms_threshold=client.vad_rms_threshold, sample_rate=client.sample_rate
+        )
         if speech_segs:
             test_waveform = torch.cat(speech_segs)
         else:
@@ -112,9 +119,11 @@ def print_results(label: str, window_results: list[dict], full_score: float, thr
     pass_rate = passed / len(scores) * 100 if scores else 0
 
     print(f"\n  {label}")
-    print(f"  最高分: {max_score:.4f}  平均分: {avg_score:.4f}  "
-          f">={threshold:.2f}: {passed}/{len(scores)} ({pass_rate:.1f}%)  "
-          f"Full: {full_score:.4f} {'✅' if full_score >= threshold else '❌'}")
+    print(
+        f"  最高分: {max_score:.4f}  平均分: {avg_score:.4f}  "
+        f">={threshold:.2f}: {passed}/{len(scores)} ({pass_rate:.1f}%)  "
+        f"Full: {full_score:.4f} {'✅' if full_score >= threshold else '❌'}"
+    )
 
     return max_score, avg_score, pass_rate, full_score
 
@@ -159,11 +168,13 @@ def main():
             for f in files:
                 w = _load_audio(f, 16000)
                 for i in range(len(w) // seg_len):
-                    seg = w[i * seg_len:(i + 1) * seg_len]
+                    seg = w[i * seg_len : (i + 1) * seg_len]
                     snr_list.append(_estimate_snr(seg))
             if snr_list:
-                print(f"  注册片段 SNR: min={min(snr_list):.1f}dB, "
-                      f"max={max(snr_list):.1f}dB, mean={np.mean(snr_list):.1f}dB")
+                print(
+                    f"  注册片段 SNR: min={min(snr_list):.1f}dB, "
+                    f"max={max(snr_list):.1f}dB, mean={np.mean(snr_list):.1f}dB"
+                )
 
         # VAD 段数展示
         if cfg["vad"]:
@@ -172,36 +183,46 @@ def main():
                 segs = _vad_segments(w, rms_threshold=client.vad_rms_threshold)
                 total_vad_secs = sum(len(s) / 16000 for s in segs)
                 orig_secs = len(w) / 16000
-                print(f"  {label} VAD: {len(segs)} 段, {total_vad_secs:.1f}s / {orig_secs:.1f}s "
-                      f"(保留 {total_vad_secs/orig_secs*100:.0f}%)")
+                print(
+                    f"  {label} VAD: {len(segs)} 段, {total_vad_secs:.1f}s / {orig_secs:.1f}s "
+                    f"(保留 {total_vad_secs/orig_secs*100:.0f}%)"
+                )
 
         # Clean 测试
         clean_results, clean_full = sliding_window_test(client, clean_test, ref)
-        c_max, c_avg, c_rate, c_full = print_results(
-            "Clean", clean_results, clean_full, threshold)
+        c_max, c_avg, c_rate, c_full = print_results("Clean", clean_results, clean_full, threshold)
 
         # Noisy 测试
         noisy_results, noisy_full = sliding_window_test(client, noisy_test, ref)
-        n_max, n_avg, n_rate, n_full = print_results(
-            "Noisy", noisy_results, noisy_full, threshold)
+        n_max, n_avg, n_rate, n_full = print_results("Noisy", noisy_results, noisy_full, threshold)
 
-        summary.append({
-            "name": cfg["name"],
-            "clean_max": c_max, "clean_full": c_full, "clean_rate": c_rate,
-            "noisy_max": n_max, "noisy_full": n_full, "noisy_rate": n_rate,
-        })
+        summary.append(
+            {
+                "name": cfg["name"],
+                "clean_max": c_max,
+                "clean_full": c_full,
+                "clean_rate": c_rate,
+                "noisy_max": n_max,
+                "noisy_full": n_full,
+                "noisy_rate": n_rate,
+            }
+        )
 
     # 汇总表
     print(f"\n\n{'='*80}")
     print(f"  汇总对比")
     print(f"{'='*80}")
-    print(f"  {'配置':<25} {'Clean最高':>10} {'Clean Full':>10} {'Clean通过率':>10}  "
-          f"{'Noisy最高':>10} {'Noisy Full':>10} {'Noisy通过率':>10}")
+    print(
+        f"  {'配置':<25} {'Clean最高':>10} {'Clean Full':>10} {'Clean通过率':>10}  "
+        f"{'Noisy最高':>10} {'Noisy Full':>10} {'Noisy通过率':>10}"
+    )
     print(f"  {'-'*80}")
     for s in summary:
-        print(f"  {s['name']:<25} {s['clean_max']:>10.4f} {s['clean_full']:>10.4f} "
-              f"{s['clean_rate']:>9.1f}%  {s['noisy_max']:>10.4f} {s['noisy_full']:>10.4f} "
-              f"{s['noisy_rate']:>9.1f}%")
+        print(
+            f"  {s['name']:<25} {s['clean_max']:>10.4f} {s['clean_full']:>10.4f} "
+            f"{s['clean_rate']:>9.1f}%  {s['noisy_max']:>10.4f} {s['noisy_full']:>10.4f} "
+            f"{s['noisy_rate']:>9.1f}%"
+        )
     print(f"{'='*80}")
 
 

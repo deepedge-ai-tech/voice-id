@@ -21,10 +21,10 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-
 # --------------------------------------------------------------------------- #
 #  音频加载
 # --------------------------------------------------------------------------- #
+
 
 def _load_audio(path: str, target_sr: int = 16000) -> torch.Tensor:
     """读取音频文件 → 单声道 → 目标采样率 → float32 [-1,1] waveform."""
@@ -32,6 +32,7 @@ def _load_audio(path: str, target_sr: int = 16000) -> torch.Tensor:
     # 优先 torchaudio（支持 mp3/wav/ogg，需 ffmpeg）
     try:
         import torchaudio
+
         waveform, sr = torchaudio.load(path)
         if sr != target_sr:
             waveform = torchaudio.functional.resample(waveform, sr, target_sr)
@@ -42,6 +43,7 @@ def _load_audio(path: str, target_sr: int = 16000) -> torch.Tensor:
     # fallback: librosa
     try:
         import librosa
+
         arr, _ = librosa.load(path, sr=target_sr, mono=True)
         return torch.from_numpy(arr)
     except Exception as exc:
@@ -52,21 +54,22 @@ def _load_audio(path: str, target_sr: int = 16000) -> torch.Tensor:
 #  模型加载 (pyannote.audio 后端)
 # --------------------------------------------------------------------------- #
 
+
 @lru_cache(maxsize=1)
 def _load_model(model_path: str, device: str) -> torch.nn.Module:
     """加载 WeSpeaker ResNet34 模型，缓存单例."""
     try:
         from pyannote.audio import Model
     except ImportError as exc:
-        raise ImportError(
-            "未安装 pyannote.audio: pip install pyannote.audio"
-        ) from exc
+        raise ImportError("未安装 pyannote.audio: pip install pyannote.audio") from exc
 
     # 兼容旧版 torch.load(weights_only=False)
     _real = torch.load
+
     def _load(*a, **kw):
         kw["weights_only"] = False
         return _real(*a, **kw)
+
     torch.load = _load  # type: ignore[assignment]
 
     dev = torch.device(device)
@@ -89,17 +92,26 @@ def _extract_embedding(model: torch.nn.Module, waveform: torch.Tensor) -> torch.
 #  噪声增强 (可选)
 # --------------------------------------------------------------------------- #
 
+
 class _NoiseAugmentor:
-    def __init__(self, sample_rate: int = 16000, augment_ratio: float = 0.6,
-                 noise_dir: str = "", seed: Optional[int] = None):
+    def __init__(
+        self,
+        sample_rate: int = 16000,
+        augment_ratio: float = 0.6,
+        noise_dir: str = "",
+        seed: Optional[int] = None,
+    ):
         self.sample_rate = sample_rate
         self.augment_ratio = augment_ratio
         import random
+
         self._rand = random.Random(seed)
 
         try:
             from audiomentations import (
-                AddBackgroundNoise, AddGaussianSNR, AddShortNoises,
+                AddBackgroundNoise,
+                AddGaussianSNR,
+                AddShortNoises,
             )
         except ImportError:
             self._available = False
@@ -110,11 +122,13 @@ class _NoiseAugmentor:
         self._gaussian = AddGaussianSNR(min_snr_db=5, max_snr_db=20, p=1.0)
         self._background = (
             AddBackgroundNoise(sounds_path=noise_path, min_snr_db=5, max_snr_db=20, p=1.0)
-            if has_noise else None
+            if has_noise
+            else None
         )
         self._short = (
             AddShortNoises(sounds_path=noise_path, min_snr_db=3, max_snr_db=18, p=1.0)
-            if has_noise else None
+            if has_noise
+            else None
         )
 
     def augment(self, segments: list[np.ndarray]) -> list[np.ndarray]:
@@ -142,7 +156,10 @@ class _NoiseAugmentor:
 #  SNR 估计 & VAD
 # --------------------------------------------------------------------------- #
 
-def _estimate_snr(waveform: torch.Tensor, sample_rate: int = 16000, frame_ms: int = 25, hop_ms: int = 10) -> float:
+
+def _estimate_snr(
+    waveform: torch.Tensor, sample_rate: int = 16000, frame_ms: int = 25, hop_ms: int = 10
+) -> float:
     """估计音频片段的信噪比（dB）。
 
     将信号分帧，以能量最低的 10% 帧作为噪声估计，
@@ -156,8 +173,8 @@ def _estimate_snr(waveform: torch.Tensor, sample_rate: int = 16000, frame_ms: in
 
     frames = []
     for start in range(0, len(waveform) - frame_len + 1, hop_len):
-        seg = waveform[start:start + frame_len]
-        energy = (seg ** 2).mean().item()
+        seg = waveform[start : start + frame_len]
+        energy = (seg**2).mean().item()
         if energy > 1e-10:
             frames.append(energy)
 
@@ -175,8 +192,10 @@ def _estimate_snr(waveform: torch.Tensor, sample_rate: int = 16000, frame_ms: in
 
 
 def _vad_segments(
-    waveform: torch.Tensor, rms_threshold: float = 0.005,
-    min_duration_ms: int = 100, sample_rate: int = 16000,
+    waveform: torch.Tensor,
+    rms_threshold: float = 0.005,
+    min_duration_ms: int = 100,
+    sample_rate: int = 16000,
 ) -> list[torch.Tensor]:
     """基于 RMS 能量的语音活动检测，返回有语音的片段列表。
 
@@ -185,14 +204,14 @@ def _vad_segments(
     如果计算出的阈值低于固定下限，则使用固定下限。
     """
     frame_len = int(0.02 * sample_rate)  # 20ms
-    hop_len = int(0.01 * sample_rate)    # 10ms
+    hop_len = int(0.01 * sample_rate)  # 10ms
     min_samples = int(min_duration_ms / 1000 * sample_rate)
 
     rms_values = []
     starts = []
     for start in range(0, len(waveform) - frame_len + 1, hop_len):
-        seg = waveform[start:start + frame_len]
-        rms = float(torch.sqrt((seg ** 2).mean()))
+        seg = waveform[start : start + frame_len]
+        rms = float(torch.sqrt((seg**2).mean()))
         rms_values.append(rms)
         starts.append(start)
 
@@ -224,6 +243,7 @@ def _vad_segments(
 # --------------------------------------------------------------------------- #
 #  主类
 # --------------------------------------------------------------------------- #
+
 
 @dataclass
 class WespeakerClient:
@@ -273,7 +293,7 @@ class WespeakerClient:
         if waveform.numel() < seg_len:
             return {"ok": False, "error": "音频太短，无法切分出有效片段"}
         segments = [
-            waveform[i * seg_len:(i + 1) * seg_len].cpu().numpy()
+            waveform[i * seg_len : (i + 1) * seg_len].cpu().numpy()
             for i in range(len(waveform) // seg_len)
         ]
 
@@ -322,7 +342,11 @@ class WespeakerClient:
         if not Path(audio_path).is_file():
             return {"is_recognized": False, "confidence": 0.0, "error": f"文件不存在: {audio_path}"}
         if not Path(pk_path).is_file():
-            return {"is_recognized": False, "confidence": 0.0, "error": f"声纹文件不存在: {pk_path}"}
+            return {
+                "is_recognized": False,
+                "confidence": 0.0,
+                "error": f"声纹文件不存在: {pk_path}",
+            }
 
         self._ensure_model()
 
@@ -341,13 +365,17 @@ class WespeakerClient:
 
         # VAD 去静音/去纯噪声
         if self.enable_vad and self.verify_crop_mode == "full_utterance":
-            speech_segs = _vad_segments(waveform, rms_threshold=self.vad_rms_threshold, sample_rate=self.sample_rate)
+            speech_segs = _vad_segments(
+                waveform, rms_threshold=self.vad_rms_threshold, sample_rate=self.sample_rate
+            )
             if speech_segs and len(speech_segs) > 0:
                 pcm = torch.cat(speech_segs)
             else:
                 pcm = waveform
         else:
-            pcm = _crop_verify(waveform, self.verify_crop_mode, self.verify_window_secs, self.sample_rate)
+            pcm = _crop_verify(
+                waveform, self.verify_crop_mode, self.verify_window_secs, self.sample_rate
+            )
         if pcm.numel() == 0:
             return {"is_recognized": False, "confidence": 0.0, "error": "音频太短"}
 
@@ -379,7 +407,7 @@ class WespeakerClient:
             if waveform.numel() < seg_len:
                 continue
             for i in range(len(waveform) // seg_len):
-                all_segments.append(waveform[i * seg_len:(i + 1) * seg_len])
+                all_segments.append(waveform[i * seg_len : (i + 1) * seg_len])
 
         if not all_segments:
             return {"ok": False, "error": "无有效音频片段"}
@@ -391,7 +419,9 @@ class WespeakerClient:
             weights = torch.tensor([max(s, 0.0) for s in snr_values], dtype=torch.float32)
             if weights.sum() > 0:
                 weights = weights / weights.sum()
-                mean_emb = F.normalize((torch.stack(embeddings, dim=0) * weights.unsqueeze(1)).sum(dim=0), dim=0)
+                mean_emb = F.normalize(
+                    (torch.stack(embeddings, dim=0) * weights.unsqueeze(1)).sum(dim=0), dim=0
+                )
             else:
                 mean_emb = F.normalize(torch.stack(embeddings, dim=0).mean(dim=0), dim=0)
         else:
@@ -417,6 +447,7 @@ class WespeakerClient:
             )
         return self._aug
 
+
 def _crop_verify(
     waveform: torch.Tensor, mode: str, window_secs: float, sample_rate: int
 ) -> torch.Tensor:
@@ -428,8 +459,6 @@ def _crop_verify(
     if mode == "head_window":
         return waveform[:window]
     return waveform[-window:] if waveform.numel() > window else waveform
-
-
 
 
 # --------------------------------------------------------------------------- #

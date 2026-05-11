@@ -72,8 +72,9 @@ class TestWespeakerClient:
     def test_recognize_with_nonexistent_voiceprint_should_fail(self, client):
         """测试：不存在的声纹文件应该返回错误。"""
         # Create a temp audio file first
-        import soundfile as sf
         import numpy as np
+        import soundfile as sf
+
         sf.write("/tmp/test_audio.wav", np.zeros(16000), 16000)
         result = client.recognize("/tmp/test_audio.wav", "/nonexistent.pkl")
         assert result["is_recognized"] is False
@@ -110,9 +111,10 @@ class TestEnrollMixed:
 
     def test_enroll_mixed_creates_valid_pickle(self, client):
         """测试：混合注册应生成有效的 pickle 文件。"""
-        import soundfile as sf
-        import numpy as np
         import os
+
+        import numpy as np
+        import soundfile as sf
 
         # Create test audio files
         sf.write("/tmp/clean_test.wav", np.zeros(16000), 16000)  # 1s
@@ -121,7 +123,9 @@ class TestEnrollMixed:
         if os.path.exists("/tmp/mixed_test.pkl"):
             os.remove("/tmp/mixed_test.pkl")
 
-        result = client.enroll_mixed(["/tmp/clean_test.wav"], ["/tmp/noisy_test.wav"], "/tmp/mixed_test.pkl")
+        result = client.enroll_mixed(
+            ["/tmp/clean_test.wav"], ["/tmp/noisy_test.wav"], "/tmp/mixed_test.pkl"
+        )
         assert result["ok"] is True
         assert result["num_segments"] == 3  # 1 + 2 segments
         assert os.path.exists("/tmp/mixed_test.pkl")

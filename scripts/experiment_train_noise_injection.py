@@ -22,21 +22,21 @@ from src.wespeaker.wespeaker import (
     _vad_segments,
 )
 
-
 # --------------------------------------------------------------------------- #
 #  噪声提取
 # --------------------------------------------------------------------------- #
 
-def extract_noise_profile(noisy_audio_path: str, sample_rate: int = 16000,
-                          rms_threshold: float = 0.005) -> np.ndarray:
+
+def extract_noise_profile(
+    noisy_audio_path: str, sample_rate: int = 16000, rms_threshold: float = 0.005
+) -> np.ndarray:
     """从噪声音频中提取噪声 profile。
 
     方法：用 VAD 检测语音段，取非语音段（静音/纯噪声段）拼接。
     """
     waveform = _load_audio(noisy_audio_path, sample_rate)
 
-    speech_segs = _vad_segments(waveform, rms_threshold=rms_threshold,
-                                sample_rate=sample_rate)
+    speech_segs = _vad_segments(waveform, rms_threshold=rms_threshold, sample_rate=sample_rate)
 
     if not speech_segs:
         return waveform.cpu().numpy()
@@ -47,8 +47,8 @@ def extract_noise_profile(noisy_audio_path: str, sample_rate: int = 16000,
     rms_values = []
     starts = []
     for start in range(0, len(waveform) - frame_len + 1, hop_len):
-        seg = waveform[start:start + frame_len]
-        rms = float(torch.sqrt((seg ** 2).mean()))
+        seg = waveform[start : start + frame_len]
+        rms = float(torch.sqrt((seg**2).mean()))
         rms_values.append(rms)
         starts.append(start)
 
@@ -83,14 +83,15 @@ def extract_noise_profile(noisy_audio_path: str, sample_rate: int = 16000,
     return waveform.cpu().numpy()
 
 
-def mix_noise_at_snr(clean: np.ndarray, noise: np.ndarray,
-                     target_snr_db: float, sample_rate: int = 16000) -> np.ndarray:
+def mix_noise_at_snr(
+    clean: np.ndarray, noise: np.ndarray, target_snr_db: float, sample_rate: int = 16000
+) -> np.ndarray:
     """将噪声混合到 clean 音频中，达到目标 SNR。
 
     SNR = 10 * log10(P_signal / P_noise)
     """
-    clean_power = np.mean(clean ** 2)
-    noise_power = np.mean(noise ** 2)
+    clean_power = np.mean(clean**2)
+    noise_power = np.mean(noise**2)
 
     if noise_power < 1e-12:
         return clean.copy()
@@ -100,7 +101,7 @@ def mix_noise_at_snr(clean: np.ndarray, noise: np.ndarray,
 
     if len(noise) < len(clean):
         noise = np.tile(noise, (len(clean) // len(noise)) + 2)
-    noise = noise[:len(clean)]
+    noise = noise[: len(clean)]
 
     return (clean + noise_scale * noise).astype(np.float32)
 
@@ -109,26 +110,27 @@ def mix_noise_at_snr(clean: np.ndarray, noise: np.ndarray,
 #  注册与测试
 # --------------------------------------------------------------------------- #
 
-def enroll_noise_injected(client: WespeakerClient, clean_segments: list[np.ndarray],
-                          noise_profile: np.ndarray, snr_levels: list[float]
-                          ) -> torch.Tensor:
+
+def enroll_noise_injected(
+    client: WespeakerClient,
+    clean_segments: list[np.ndarray],
+    noise_profile: np.ndarray,
+    snr_levels: list[float],
+) -> torch.Tensor:
     """用噪声注入方式注册声纹。"""
     all_embeddings = []
 
     for clean_seg in clean_segments:
         for snr in snr_levels:
             mixed = mix_noise_at_snr(clean_seg, noise_profile, snr)
-            emb = _extract_embedding(
-                client._model, torch.from_numpy(mixed)
-            )
+            emb = _extract_embedding(client._model, torch.from_numpy(mixed))
             all_embeddings.append(F.normalize(emb, dim=0))
 
     ref = F.normalize(torch.stack(all_embeddings).mean(dim=0), dim=0)
     return ref
 
 
-def enroll_clean_only(client: WespeakerClient,
-                      clean_segments: list[np.ndarray]) -> torch.Tensor:
+def enroll_clean_only(client: WespeakerClient, clean_segments: list[np.ndarray]) -> torch.Tensor:
     """纯 clean 注册（baseline）。"""
     embeddings = []
     for seg in clean_segments:
@@ -137,11 +139,12 @@ def enroll_clean_only(client: WespeakerClient,
     return F.normalize(torch.stack(embeddings).mean(dim=0), dim=0)
 
 
-def enroll_gaussian_augmented(client: WespeakerClient,
-                               clean_segments: list[np.ndarray],
-                               seed: int = 42) -> torch.Tensor:
+def enroll_gaussian_augmented(
+    client: WespeakerClient, clean_segments: list[np.ndarray], seed: int = 42
+) -> torch.Tensor:
     """高斯 SNR 增强注册（复现之前的实验）。"""
     from src.wespeaker.wespeaker import _NoiseAugmentor
+
     aug = _NoiseAugmentor(sample_rate=16000, augment_ratio=1.0, seed=seed)
     augmented = aug.augment(clean_segments)
 
@@ -156,9 +159,13 @@ def enroll_gaussian_augmented(client: WespeakerClient,
     return F.normalize(torch.stack(all_embeddings).mean(dim=0), dim=0)
 
 
-def sliding_window_test(client: WespeakerClient, audio_path: str,
-                        reference: torch.Tensor, window_secs: float = 2.0,
-                        step_secs: float = 0.5) -> tuple[list[dict], float]:
+def sliding_window_test(
+    client: WespeakerClient,
+    audio_path: str,
+    reference: torch.Tensor,
+    window_secs: float = 2.0,
+    step_secs: float = 0.5,
+) -> tuple[list[dict], float]:
     """滑动窗口测试 + full utterance。"""
     waveform = _load_audio(audio_path, client.sample_rate)
     total_secs = len(waveform) / client.sample_rate
@@ -182,8 +189,9 @@ def sliding_window_test(client: WespeakerClient, audio_path: str,
     return results, round(full_score, 4)
 
 
-def print_results(label: str, window_results: list[dict], full_score: float,
-                  threshold: float = 0.55) -> dict:
+def print_results(
+    label: str, window_results: list[dict], full_score: float, threshold: float = 0.55
+) -> dict:
     """打印测试结果并返回统计。"""
     scores = [r["score"] for r in window_results]
     max_score = max(scores)
@@ -201,16 +209,21 @@ def print_results(label: str, window_results: list[dict], full_score: float,
     print(f"    Full utterance: {full_score:.4f} {'✅' if full_score >= threshold else '❌'}")
 
     return {
-        "max_score": max_score, "max_pos": max_pos,
-        "mean_score": avg_score, "pass_count": passed,
-        "total_windows": len(scores), "pass_rate": pass_rate,
-        "above_70": above_70, "full_score": full_score,
+        "max_score": max_score,
+        "max_pos": max_pos,
+        "mean_score": avg_score,
+        "pass_count": passed,
+        "total_windows": len(scores),
+        "pass_rate": pass_rate,
+        "above_70": above_70,
+        "full_score": full_score,
     }
 
 
 # --------------------------------------------------------------------------- #
 #  主实验
 # --------------------------------------------------------------------------- #
+
 
 def main():
     client = WespeakerClient(device="cpu", enable_augmentation=False)
@@ -325,8 +338,10 @@ def main():
     print(f"\n\n{'='*80}")
     print(f"  汇总对比 (Noisy 环境)")
     print(f"{'='*80}")
-    print(f"  {'方案':<30} {'最高分':>8} {'平均分':>8} {'>={threshold:.2f}':>12} "
-          f"{'>=0.70':>8} {'Full':>8}")
+    print(
+        f"  {'方案':<30} {'最高分':>8} {'平均分':>8} {'>={threshold:.2f}':>12} "
+        f"{'>=0.70':>8} {'Full':>8}"
+    )
     print(f"  {'-'*80}")
 
     scheme_names = {
@@ -338,12 +353,20 @@ def main():
         "weighted_noisy": "噪声注入 (加权)",
     }
 
-    for key in ["baseline_noisy", "gaussian_noisy", "multi_noisy",
-                "10db_noisy", "5db_noisy", "weighted_noisy"]:
+    for key in [
+        "baseline_noisy",
+        "gaussian_noisy",
+        "multi_noisy",
+        "10db_noisy",
+        "5db_noisy",
+        "weighted_noisy",
+    ]:
         r = all_results[key]
-        print(f"  {scheme_names[key]:<30} {r['max_score']:>8.4f} {r['mean_score']:>8.4f} "
-              f"{r['pass_count']:>5}/{r['total_windows']} ({r['pass_rate']:.1f}%) "
-              f"{r['above_70']:>4}/{r['total_windows']} {r['full_score']:>8.4f}")
+        print(
+            f"  {scheme_names[key]:<30} {r['max_score']:>8.4f} {r['mean_score']:>8.4f} "
+            f"{r['pass_count']:>5}/{r['total_windows']} ({r['pass_rate']:.1f}%) "
+            f"{r['above_70']:>4}/{r['total_windows']} {r['full_score']:>8.4f}"
+        )
 
     print(f"{'='*80}")
 
@@ -358,9 +381,18 @@ def main():
         r = all_results[key]
         max_degrade = r["max_score"] - baseline_clean_max
         full_degrade = r["full_score"] - baseline_clean_full
-        name = key.replace("_clean", "").replace("baseline", "Baseline").replace("gaussian", "高斯增强").replace("multi", "multi-SNR").replace("10db", "SNR=10dB").replace("5db", "SNR=5dB").replace("weighted", "加权")
-        print(f"  {name:<30} {r['max_score']:>8.4f} {r['full_score']:>8.4f} "
-              f"{max_degrade:>+8.4f}")
+        name = (
+            key.replace("_clean", "")
+            .replace("baseline", "Baseline")
+            .replace("gaussian", "高斯增强")
+            .replace("multi", "multi-SNR")
+            .replace("10db", "SNR=10dB")
+            .replace("5db", "SNR=5dB")
+            .replace("weighted", "加权")
+        )
+        print(
+            f"  {name:<30} {r['max_score']:>8.4f} {r['full_score']:>8.4f} " f"{max_degrade:>+8.4f}"
+        )
 
 
 if __name__ == "__main__":

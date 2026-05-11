@@ -35,8 +35,11 @@ def enroll_segments(client: WespeakerClient, segment_dir: str) -> torch.Tensor:
 
 
 def sliding_window_test(
-    client: WespeakerClient, audio_path: str, reference: torch.Tensor,
-    window_secs: float = 2.0, step_secs: float = 0.5,
+    client: WespeakerClient,
+    audio_path: str,
+    reference: torch.Tensor,
+    window_secs: float = 2.0,
+    step_secs: float = 0.5,
 ) -> list[dict]:
     """滑动窗口测试，返回每个窗口的相似度分数。"""
     waveform = _load_audio(audio_path, client.sample_rate)
@@ -98,8 +101,10 @@ def main():
 
     threshold = client.sim_threshold
     print(f"\n优化验证测试")
-    print(f"参数: verify_crop_mode={client.verify_crop_mode}, "
-          f"sim_threshold={threshold}, verify_buffer_keep_secs={client.verify_buffer_keep_secs}")
+    print(
+        f"参数: verify_crop_mode={client.verify_crop_mode}, "
+        f"sim_threshold={threshold}, verify_buffer_keep_secs={client.verify_buffer_keep_secs}"
+    )
 
     # 注册：使用 clean 片段
     print(f"\n正在注册 clean 声纹...")
@@ -123,7 +128,9 @@ def main():
         mark = "✅" if r["score"] >= threshold else "  "
         print(f"    {mark} {r['start']:.2f}s -> {r['score']:.4f}")
     if top_idx >= 10:
-        print(f"  最高分窗口: {clean_results[top_idx]['start']:.2f}s -> {clean_results[top_idx]['score']:.4f}")
+        print(
+            f"  最高分窗口: {clean_results[top_idx]['start']:.2f}s -> {clean_results[top_idx]['score']:.4f}"
+        )
 
     print(f"\n--- Noisy 环境测试 ---")
     noisy_results, noisy_full = sliding_window_test(client, noisy_test, clean_ref)
@@ -137,7 +144,9 @@ def main():
         mark = "✅" if r["score"] >= threshold else "  "
         print(f"    {mark} {r['start']:.2f}s -> {r['score']:.4f}")
     if top_idx >= 10:
-        print(f"  最高分窗口: {noisy_results[top_idx]['start']:.2f}s -> {noisy_results[top_idx]['score']:.4f}")
+        print(
+            f"  最高分窗口: {noisy_results[top_idx]['start']:.2f}s -> {noisy_results[top_idx]['score']:.4f}"
+        )
 
     # 对比基线（旧参数下的结果）
     print(f"\n{'='*60}")

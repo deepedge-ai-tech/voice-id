@@ -18,12 +18,12 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from src.wespeaker.wespeaker import WespeakerClient, _load_audio, _extract_embedding
-
+from src.wespeaker.wespeaker import WespeakerClient, _extract_embedding, _load_audio
 
 # --------------------------------------------------------------------------- #
 #  公共函数
 # --------------------------------------------------------------------------- #
+
 
 def enroll_segments(segment_paths, client):
     """使用给定音频列表注册声纹，返回归一化均值 embedding。"""
@@ -43,7 +43,7 @@ def sliding_window_test(waveform, ref, client, window_secs=2.0, step_secs=0.5):
 
     scores = []
     for start in range(0, len(waveform) - window_len + 1, step_len):
-        seg = waveform[start:start + window_len]
+        seg = waveform[start : start + window_len]
         emb = F.normalize(_extract_embedding(client._model, seg), dim=0)
         score = float(torch.dot(emb, ref).clamp(-1, 1).item())
         scores.append((start / 16000, score))
@@ -72,6 +72,7 @@ def get_segments(directory, pattern="*.wav"):
 #  方案 1：混合注册
 # --------------------------------------------------------------------------- #
 
+
 def experiment_mixed_enrollment(client, noisy_audio, ref_clean):
     """混合注册：clean segments + noisy audio 一起注册。"""
     print("\n" + "=" * 60)
@@ -89,7 +90,7 @@ def experiment_mixed_enrollment(client, noisy_audio, ref_clean):
     seg_len = 16000
     noisy_segments = []
     for i in range(len(noisy_waveform) // seg_len):
-        seg = noisy_waveform[i * seg_len:(i + 1) * seg_len]
+        seg = noisy_waveform[i * seg_len : (i + 1) * seg_len]
         noisy_segments.append(seg)
     print(f"Noisy segments (1s chunks): {len(noisy_segments)} 个")
 
@@ -125,8 +126,10 @@ def experiment_mixed_enrollment(client, noisy_audio, ref_clean):
     print(f"  最高分: {stats_mixed['max_score']:.4f}, 平均分: {stats_mixed['mean_score']:.4f}")
     print(f"  Full utterance: {full_mixed:.4f}")
 
-    print(f"\n提升: 最高分 {stats_mixed['max_score'] - stats_clean['max_score']:+.4f}, "
-          f"平均分 {stats_mixed['mean_score'] - stats_clean['mean_score']:+.4f}")
+    print(
+        f"\n提升: 最高分 {stats_mixed['max_score'] - stats_clean['max_score']:+.4f}, "
+        f"平均分 {stats_mixed['mean_score'] - stats_clean['mean_score']:+.4f}"
+    )
 
     return {
         "clean_ref_stats": stats_clean,
@@ -140,6 +143,7 @@ def experiment_mixed_enrollment(client, noisy_audio, ref_clean):
 #  方案 2：噪声增强
 # --------------------------------------------------------------------------- #
 
+
 def experiment_noise_augmentation(client, noisy_audio, ref_clean):
     """噪声增强：用高斯噪声增强注册片段。"""
     print("\n" + "=" * 60)
@@ -151,6 +155,7 @@ def experiment_noise_augmentation(client, noisy_audio, ref_clean):
 
     # 用内置 _NoiseAugmentor 做增强
     from src.wespeaker.wespeaker import _NoiseAugmentor
+
     aug = _NoiseAugmentor(sample_rate=16000, augment_ratio=1.0, seed=42)
 
     # 加载并增强
@@ -186,15 +191,19 @@ def experiment_noise_augmentation(client, noisy_audio, ref_clean):
     stats_baseline = compute_stats(scores_baseline)
 
     print(f"\nBaseline (无增强) -> Noisy audio:")
-    print(f"  最高分: {stats_baseline['max_score']:.4f}, 平均分: {stats_baseline['mean_score']:.4f}")
+    print(
+        f"  最高分: {stats_baseline['max_score']:.4f}, 平均分: {stats_baseline['mean_score']:.4f}"
+    )
     print(f"  Full utterance: {float(torch.dot(full_emb, ref_clean).clamp(-1, 1).item()):.4f}")
 
     print(f"\n增强注册 -> Noisy audio:")
     print(f"  最高分: {stats['max_score']:.4f}, 平均分: {stats['mean_score']:.4f}")
     print(f"  Full utterance: {full_score:.4f}")
 
-    print(f"\n提升: 最高分 {stats['max_score'] - stats_baseline['max_score']:+.4f}, "
-          f"平均分 {stats['mean_score'] - stats_baseline['mean_score']:+.4f}")
+    print(
+        f"\n提升: 最高分 {stats['max_score'] - stats_baseline['max_score']:+.4f}, "
+        f"平均分 {stats['mean_score'] - stats_baseline['mean_score']:+.4f}"
+    )
 
     return {
         "baseline_stats": stats_baseline,
@@ -207,6 +216,7 @@ def experiment_noise_augmentation(client, noisy_audio, ref_clean):
 # --------------------------------------------------------------------------- #
 #  方案 3：动态阈值分析
 # --------------------------------------------------------------------------- #
+
 
 def experiment_threshold_analysis(client, noisy_audio, clean_audio, ref_clean):
     """分析不同阈值下的 FAR/FRR，找出噪声场景最佳阈值。"""
@@ -233,9 +243,11 @@ def experiment_threshold_analysis(client, noisy_audio, clean_audio, ref_clean):
         clean_rate = clean_pass / len(scores_clean) * 100
         noisy_rate = noisy_pass / len(scores_noisy) * 100
         gap = clean_rate - noisy_rate
-        print(f"{t:.2f}    | {clean_rate:>5.1f}%  ({clean_pass:>3}/{len(scores_clean)})"
-              f" | {noisy_rate:>5.1f}%  ({noisy_pass:>3}/{len(scores_noisy)})"
-              f" | {gap:+.1f}%")
+        print(
+            f"{t:.2f}    | {clean_rate:>5.1f}%  ({clean_pass:>3}/{len(scores_clean)})"
+            f" | {noisy_rate:>5.1f}%  ({noisy_pass:>3}/{len(scores_noisy)})"
+            f" | {gap:+.1f}%"
+        )
         results[t] = {
             "clean_rate": clean_rate,
             "noisy_rate": noisy_rate,
@@ -268,6 +280,7 @@ def experiment_threshold_analysis(client, noisy_audio, clean_audio, ref_clean):
 #  方案 4：噪声预处理（尝试 noisereduce）
 # --------------------------------------------------------------------------- #
 
+
 def experiment_denoise(client, noisy_audio, ref_clean):
     """噪声预处理：尝试 noisereduce 库做频谱减法。"""
     print("\n" + "=" * 60)
@@ -276,18 +289,18 @@ def experiment_denoise(client, noisy_audio, ref_clean):
 
     try:
         import noisereduce
+
         has_denoise = True
     except ImportError:
         has_denoise = False
         print("  noisereduce 未安装，尝试安装...")
         import subprocess
-        result = subprocess.run(
-            ["uv", "add", "noisereduce"],
-            capture_output=True, text=True
-        )
+
+        result = subprocess.run(["uv", "add", "noisereduce"], capture_output=True, text=True)
         if result.returncode == 0:
             has_denoise = True
             import noisereduce
+
             print("  安装成功")
         else:
             print(f"  安装失败: {result.stderr}")
@@ -297,7 +310,7 @@ def experiment_denoise(client, noisy_audio, ref_clean):
     noisy_np = noisy_waveform.cpu().numpy()
 
     # 用前 0.5s 作为噪声剖面
-    noise_profile = noisy_np[:int(0.5 * 16000)]
+    noise_profile = noisy_np[: int(0.5 * 16000)]
     denoised = noisereduce.reduce_noise(
         y=noisy_np,
         sr=16000,
@@ -323,15 +336,21 @@ def experiment_denoise(client, noisy_audio, ref_clean):
     full_denoised = float(torch.dot(full_emb_denoised, ref_clean).clamp(-1, 1).item())
 
     print(f"\nBaseline (原始) -> Noisy audio:")
-    print(f"  最高分: {stats_baseline['max_score']:.4f}, 平均分: {stats_baseline['mean_score']:.4f}")
+    print(
+        f"  最高分: {stats_baseline['max_score']:.4f}, 平均分: {stats_baseline['mean_score']:.4f}"
+    )
     print(f"  Full utterance: {full_raw:.4f}")
 
     print(f"\nDenoised -> Noisy audio:")
-    print(f"  最高分: {stats_denoised['max_score']:.4f}, 平均分: {stats_denoised['mean_score']:.4f}")
+    print(
+        f"  最高分: {stats_denoised['max_score']:.4f}, 平均分: {stats_denoised['mean_score']:.4f}"
+    )
     print(f"  Full utterance: {full_denoised:.4f}")
 
-    print(f"\n提升: 最高分 {stats_denoised['max_score'] - stats_baseline['max_score']:+.4f}, "
-          f"平均分 {stats_denoised['mean_score'] - stats_baseline['mean_score']:+.4f}")
+    print(
+        f"\n提升: 最高分 {stats_denoised['max_score'] - stats_baseline['max_score']:+.4f}, "
+        f"平均分 {stats_denoised['mean_score'] - stats_baseline['mean_score']:+.4f}"
+    )
 
     return {
         "baseline_stats": stats_baseline,
@@ -344,6 +363,7 @@ def experiment_denoise(client, noisy_audio, ref_clean):
 # --------------------------------------------------------------------------- #
 #  主函数
 # --------------------------------------------------------------------------- #
+
 
 def save_experiment_log(all_results, output_path):
     """保存完整的实验日志。"""
@@ -361,10 +381,18 @@ def save_experiment_log(all_results, output_path):
         if r1:
             f.write(f"| 指标 | Clean Reference | Mixed Reference |\n")
             f.write(f"|------|----------------|----------------|\n")
-            f.write(f"| 最高分 | {r1['clean_ref_stats']['max_score']:.4f} | {r1['mixed_ref_stats']['max_score']:.4f} |\n")
-            f.write(f"| 平均分 | {r1['clean_ref_stats']['mean_score']:.4f} | {r1['mixed_ref_stats']['mean_score']:.4f} |\n")
-            f.write(f"| > 0.75 窗口 | {r1['clean_ref_stats']['above_0.75']}/{r1['clean_ref_stats']['total_windows']} | {r1['mixed_ref_stats']['above_0.75']}/{r1['mixed_ref_stats']['total_windows']} |\n")
-            f.write(f"| Full utterance | {r1['clean_ref_full']:.4f} | {r1['mixed_ref_full']:.4f} |\n\n")
+            f.write(
+                f"| 最高分 | {r1['clean_ref_stats']['max_score']:.4f} | {r1['mixed_ref_stats']['max_score']:.4f} |\n"
+            )
+            f.write(
+                f"| 平均分 | {r1['clean_ref_stats']['mean_score']:.4f} | {r1['mixed_ref_stats']['mean_score']:.4f} |\n"
+            )
+            f.write(
+                f"| > 0.75 窗口 | {r1['clean_ref_stats']['above_0.75']}/{r1['clean_ref_stats']['total_windows']} | {r1['mixed_ref_stats']['above_0.75']}/{r1['mixed_ref_stats']['total_windows']} |\n"
+            )
+            f.write(
+                f"| Full utterance | {r1['clean_ref_full']:.4f} | {r1['mixed_ref_full']:.4f} |\n\n"
+            )
 
         # 方案 2
         f.write("## 方案 2：噪声增强（高斯 SNR）\n\n")
@@ -372,10 +400,18 @@ def save_experiment_log(all_results, output_path):
         if r2:
             f.write(f"| 指标 | Baseline | Augmented |\n")
             f.write(f"|------|----------|-----------|\n")
-            f.write(f"| 最高分 | {r2['baseline_stats']['max_score']:.4f} | {r2['augmented_stats']['max_score']:.4f} |\n")
-            f.write(f"| 平均分 | {r2['baseline_stats']['mean_score']:.4f} | {r2['augmented_stats']['mean_score']:.4f} |\n")
-            f.write(f"| > 0.75 窗口 | {r2['baseline_stats']['above_0.75']}/{r2['baseline_stats']['total_windows']} | {r2['augmented_stats']['above_0.75']}/{r2['augmented_stats']['total_windows']} |\n")
-            f.write(f"| Full utterance | {r2['baseline_full']:.4f} | {r2['augmented_full']:.4f} |\n\n")
+            f.write(
+                f"| 最高分 | {r2['baseline_stats']['max_score']:.4f} | {r2['augmented_stats']['max_score']:.4f} |\n"
+            )
+            f.write(
+                f"| 平均分 | {r2['baseline_stats']['mean_score']:.4f} | {r2['augmented_stats']['mean_score']:.4f} |\n"
+            )
+            f.write(
+                f"| > 0.75 窗口 | {r2['baseline_stats']['above_0.75']}/{r2['baseline_stats']['total_windows']} | {r2['augmented_stats']['above_0.75']}/{r2['augmented_stats']['total_windows']} |\n"
+            )
+            f.write(
+                f"| Full utterance | {r2['baseline_full']:.4f} | {r2['augmented_full']:.4f} |\n\n"
+            )
 
         # 方案 3
         f.write("## 方案 3：动态阈值分析\n\n")
@@ -384,7 +420,9 @@ def save_experiment_log(all_results, output_path):
             f.write(f"| 阈值 | Clean 通过率 | Noisy 通过率 | 差距 |\n")
             f.write(f"|------|-------------|-------------|------|\n")
             for t, v in r3["threshold_results"].items():
-                f.write(f"| {t:.2f} | {v['clean_rate']:.1f}% | {v['noisy_rate']:.1f}% | {v['gap']:+.1f}% |\n")
+                f.write(
+                    f"| {t:.2f} | {v['clean_rate']:.1f}% | {v['noisy_rate']:.1f}% | {v['gap']:+.1f}% |\n"
+                )
             if r3.get("recommended_threshold"):
                 f.write(f"\n**推荐阈值**: {r3['recommended_threshold']:.2f}\n\n")
 
@@ -397,26 +435,43 @@ def save_experiment_log(all_results, output_path):
             else:
                 f.write(f"| 指标 | Baseline | Denoised |\n")
                 f.write(f"|------|----------|----------|\n")
-                f.write(f"| 最高分 | {r4['baseline_stats']['max_score']:.4f} | {r4['denoised_stats']['max_score']:.4f} |\n")
-                f.write(f"| 平均分 | {r4['baseline_stats']['mean_score']:.4f} | {r4['denoised_stats']['mean_score']:.4f} |\n")
-                f.write(f"| > 0.75 窗口 | {r4['baseline_stats']['above_0.75']}/{r4['baseline_stats']['total_windows']} | {r4['denoised_stats']['above_0.75']}/{r4['denoised_stats']['total_windows']} |\n")
-                f.write(f"| Full utterance | {r4['baseline_full']:.4f} | {r4['denoised_full']:.4f} |\n\n")
+                f.write(
+                    f"| 最高分 | {r4['baseline_stats']['max_score']:.4f} | {r4['denoised_stats']['max_score']:.4f} |\n"
+                )
+                f.write(
+                    f"| 平均分 | {r4['baseline_stats']['mean_score']:.4f} | {r4['denoised_stats']['mean_score']:.4f} |\n"
+                )
+                f.write(
+                    f"| > 0.75 窗口 | {r4['baseline_stats']['above_0.75']}/{r4['baseline_stats']['total_windows']} | {r4['denoised_stats']['above_0.75']}/{r4['denoised_stats']['total_windows']} |\n"
+                )
+                f.write(
+                    f"| Full utterance | {r4['baseline_full']:.4f} | {r4['denoised_full']:.4f} |\n\n"
+                )
 
         # 总结
         f.write("## 总结\n\n")
         f.write("| 方案 | 最高分变化 | 平均分变化 | 推荐程度 |\n")
         f.write(f"|------|-----------|-----------|----------|\n")
 
-        for name, key in [("混合注册", "mixed_enrollment"), ("噪声增强", "noise_augmentation"),
-                           ("噪声预处理", "denoise")]:
+        for name, key in [
+            ("混合注册", "mixed_enrollment"),
+            ("噪声增强", "noise_augmentation"),
+            ("噪声预处理", "denoise"),
+        ]:
             r = all_results.get(key, {})
             if r and "error" not in r:
                 if key == "mixed_enrollment":
                     diff_max = r["mixed_ref_stats"]["max_score"] - r["clean_ref_stats"]["max_score"]
-                    diff_mean = r["mixed_ref_stats"]["mean_score"] - r["clean_ref_stats"]["mean_score"]
+                    diff_mean = (
+                        r["mixed_ref_stats"]["mean_score"] - r["clean_ref_stats"]["mean_score"]
+                    )
                 else:
-                    diff_max = r.get("augmented_stats", r.get("denoised_stats", {})).get("max_score", 0) - r.get("baseline_stats", {}).get("max_score", 0)
-                    diff_mean = r.get("augmented_stats", r.get("denoised_stats", {})).get("mean_score", 0) - r.get("baseline_stats", {}).get("mean_score", 0)
+                    diff_max = r.get("augmented_stats", r.get("denoised_stats", {})).get(
+                        "max_score", 0
+                    ) - r.get("baseline_stats", {}).get("max_score", 0)
+                    diff_mean = r.get("augmented_stats", r.get("denoised_stats", {})).get(
+                        "mean_score", 0
+                    ) - r.get("baseline_stats", {}).get("mean_score", 0)
                 stars = "★★★" if diff_max > 0.05 else "★★" if diff_max > 0 else "★"
                 f.write(f"| {name} | {diff_max:+.4f} | {diff_mean:+.4f} | {stars} |\n")
 
@@ -449,7 +504,9 @@ def main():
     all_results["mixed_enrollment"] = experiment_mixed_enrollment(client, noisy_audio, ref_clean)
 
     # 方案 2
-    all_results["noise_augmentation"] = experiment_noise_augmentation(client, noisy_audio, ref_clean)
+    all_results["noise_augmentation"] = experiment_noise_augmentation(
+        client, noisy_audio, ref_clean
+    )
 
     # 方案 3
     all_results["threshold_analysis"] = experiment_threshold_analysis(

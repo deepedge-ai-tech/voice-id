@@ -13,7 +13,7 @@ import numpy as np
 import torch
 import torch.nn.functional as F
 
-from src.wespeaker.wespeaker import WespeakerClient, _load_audio, _extract_embedding
+from src.wespeaker.wespeaker import WespeakerClient, _extract_embedding, _load_audio
 
 
 def enroll_segments(segment_dir, client):
@@ -38,7 +38,7 @@ def sliding_window_test(waveform, ref, client, window_secs=2.0, step_secs=0.5):
 
     scores = []
     for start in range(0, len(waveform) - window_len + 1, step_len):
-        seg = waveform[start:start + window_len]
+        seg = waveform[start : start + window_len]
         emb = F.normalize(_extract_embedding(client._model, seg), dim=0)
         score = float(torch.dot(emb, ref).clamp(-1, 1).item())
         scores.append((start / 16000, score))
@@ -126,9 +126,15 @@ def save_log(results, output_path):
             f.write(f"- **最高分**: {r['max_score']:.4f} (位置: {r['max_pos']:.2f}s)\n")
             f.write(f"- **平均分**: {r['mean_score']:.4f}\n")
             f.write(f"- **窗口通过率**:\n")
-            f.write(f"  - > 0.75: {r['above_0.75']}/{r['total_windows']} ({100*r['above_0.75']/r['total_windows']:.1f}%)\n")
-            f.write(f"  - > 0.70: {r['above_0.70']}/{r['total_windows']} ({100*r['above_0.70']/r['total_windows']:.1f}%)\n")
-            f.write(f"  - > 0.65: {r['above_0.65']}/{r['total_windows']} ({100*r['above_0.65']/r['total_windows']:.1f}%)\n")
+            f.write(
+                f"  - > 0.75: {r['above_0.75']}/{r['total_windows']} ({100*r['above_0.75']/r['total_windows']:.1f}%)\n"
+            )
+            f.write(
+                f"  - > 0.70: {r['above_0.70']}/{r['total_windows']} ({100*r['above_0.70']/r['total_windows']:.1f}%)\n"
+            )
+            f.write(
+                f"  - > 0.65: {r['above_0.65']}/{r['total_windows']} ({100*r['above_0.65']/r['total_windows']:.1f}%)\n"
+            )
 
             if r["full_utterance"] is not None:
                 flag = "PASS" if r["full_utterance"] > 0.75 else "FAIL"
@@ -148,10 +154,18 @@ def save_log(results, output_path):
             noisy = results[1]
             diff_max = clean["max_score"] - noisy["max_score"]
             diff_mean = clean["mean_score"] - noisy["mean_score"]
-            f.write(f"1. **噪音影响**：嘈杂环境下最高分下降 {diff_max:.4f} ({clean['max_score']:.4f} → {noisy['max_score']:.4f})\n")
-            f.write(f"2. **平均分下降**：{diff_mean:.4f} ({clean['mean_score']:.4f} → {noisy['mean_score']:.4f})\n")
-            f.write(f"3. **通过率变化**：>0.75 从 {clean['above_0.75']}/{clean['total_windows']} 变为 {noisy['above_0.75']}/{noisy['total_windows']}\n")
-            f.write(f"4. **Full utterance 对比**：{clean['full_utterance']:.4f} → {noisy['full_utterance']:.4f}\n")
+            f.write(
+                f"1. **噪音影响**：嘈杂环境下最高分下降 {diff_max:.4f} ({clean['max_score']:.4f} → {noisy['max_score']:.4f})\n"
+            )
+            f.write(
+                f"2. **平均分下降**：{diff_mean:.4f} ({clean['mean_score']:.4f} → {noisy['mean_score']:.4f})\n"
+            )
+            f.write(
+                f"3. **通过率变化**：>0.75 从 {clean['above_0.75']}/{clean['total_windows']} 变为 {noisy['above_0.75']}/{noisy['total_windows']}\n"
+            )
+            f.write(
+                f"4. **Full utterance 对比**：{clean['full_utterance']:.4f} → {noisy['full_utterance']:.4f}\n"
+            )
 
 
 def main():
