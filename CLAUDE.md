@@ -102,6 +102,10 @@ uv run python scripts/best_recognition.py enroll \
 uv run python scripts/best_recognition.py recognize \
     --audio asset/john/test_clean_segments/安静环境测试测试.m4a \
     --voiceprint asset/john/voice_best.pkl
+
+# 实时声纹监控
+uv run python -m wespeaker.realtime_monitor --voiceprint asset/john/voice_best.pkl
+uv run python -m wespeaker.realtime_monitor --list-devices
 ```
 
 ## 最佳配置（基于实验结果）
