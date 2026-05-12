@@ -1,23 +1,78 @@
 #!/usr/bin/env python3
-"""声纹测试录音脚本 — 交互式录制测试音频。
+"""声纹测试录音脚本 — 交互式分段录制测试音频。
 
-按 Enter 开始录制，再按 Enter 停止录制。录制的音频将保存到指定目录，
-可用于声纹验证测试。
+按 Enter 开始录制，再按 Enter 停止录制。录制的音频将保存为独立分段文件，
+文件名格式: test_segment_XXX_YYs.wav (YY 为脚本中标记的时长)。
+可用于声纹验证测试。支持脚本模式和自由录制模式。
 
 用法:
     uv run python scripts/test_script.py
     uv run python scripts/test_script.py --speaker frank
     uv run python scripts/test_script.py --output asset/frank/test_segments
     uv run python scripts/test_script.py --device-index 1
+    uv run python scripts/test_script.py --script docs/test_script.md
+    uv run python scripts/test_script.py --no-script
 """
 
 import argparse
+import logging
+import re
 import sys
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 
 import numpy as np
 import scipy.io.wavfile as wavfile
 import sounddevice as sd
+
+# --------------------------------------------------------------------------- #
+#  脚本读取
+# --------------------------------------------------------------------------- #
+
+
+def read_record_script(path: Path) -> list[dict[str, str]]:
+    """读取录音脚本文件，提取句子和对应的时长。
+
+    格式:
+        # 4s
+        句子1
+        句子2
+
+    Args:
+        path: 脚本文件路径
+
+    Returns:
+        句子字典列表，每个包含 'text' 和 'duration' 键
+    """
+    if not path.exists():
+        return []
+
+    content = path.read_text(encoding="utf-8")
+    lines = content.split("\n")
+
+    sentences: list[dict[str, str]] = []
+    current_duration = "3s"  # 默认时长
+
+    for line in lines:
+        line = line.strip()
+        # 检查是否是时长标记 (如 # 4s)
+        duration_match = re.match(r"#\s*(\d+[sm]?)\s*", line)
+        if duration_match:
+            current_duration = duration_match.group(1)
+            if not current_duration.endswith("s"):
+                current_duration += "s"
+            continue
+
+        # 跳过空行和注释行
+        if not line or line.startswith("#"):
+            continue
+
+        # 添加句子
+        sentences.append({"text": line, "duration": current_duration})
+
+    return sentences
+
 
 # --------------------------------------------------------------------------- #
 #  录音器
@@ -43,7 +98,7 @@ class InteractiveRecorder:
     def _audio_callback(self, indata, frames, time, status):
         """音频流回调函数。"""
         if status:
-            print(f"音频流状态: {status}", file=sys.stderr)
+            logger.warning("音频流状态: %s", status)
         if self.recording and self.audio_data is not None:
             # 追加音频数据
             current_data = indata[:, 0] if self.channels == 1 else indata
@@ -111,7 +166,7 @@ def list_devices() -> None:
     devices = sd.query_devices()
     for i, dev in enumerate(devices):
         name = dev["name"]
-        max_inputs = dev["max_inputs"]
+        max_inputs = dev["max_input_channels"]
         max_outputs = dev["max_output_channels"]
         host_api = sd.query_hostapis(dev["hostapi"])["name"]
 
@@ -136,7 +191,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--output",
-        help="输出文件路径 (default: asset/{speaker}/测试.wav)",
+        help="输出目录 (default: asset/{speaker}/test_segments)",
     )
     parser.add_argument(
         "--device-index",
@@ -154,27 +209,50 @@ def main() -> None:
         action="store_true",
         help="列出可用音频设备",
     )
+    parser.add_argument(
+        "--script",
+        default="docs/test_script.md",
+        help="测试脚本文件路径 (default: docs/test_script.md)",
+    )
+    parser.add_argument(
+        "--no-script",
+        action="store_true",
+        help="不使用脚本，自由录制",
+    )
     args = parser.parse_args()
 
     if args.list_devices:
         list_devices()
         return
 
-    # 确定输出文件
+    # 确定输出目录
     if args.output:
-        output_path = Path(args.output)
+        output_dir = Path(args.output)
     else:
-        output_path = Path(f"asset/{args.speaker}/测试.wav")
-    output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_dir = Path(f"asset/{args.speaker}/test_segments")
+    output_dir.mkdir(parents=True, exist_ok=True)
 
     print("\n" + "=" * 60)
     print("声纹测试录音脚本")
     print("=" * 60)
     print(f"说话人: {args.speaker}")
-    print(f"输出文件: {output_path}")
+    print(f"输出目录: {output_dir}")
     print(f"采样率: {args.sample_rate} Hz")
     if args.device_index is not None:
         print(f"音频设备: {args.device_index}")
+
+    # 读取脚本
+    use_script = not args.no_script
+    sentences: list[dict[str, str]] = []
+    if use_script:
+        script_path = Path(args.script)
+        if script_path.exists():
+            sentences = read_record_script(script_path)
+            print(f"脚本: {script_path} ({len(sentences)} 句)")
+        else:
+            print(f"警告: 脚本文件不存在: {script_path}")
+            print("将使用自由录制模式")
+            use_script = False
     print("=" * 60)
 
     # 初始化录音器
@@ -190,8 +268,19 @@ def main() -> None:
         print("  q + Enter - 退出程序")
         print()
 
+        script_index = 0
         count = 0
         while True:
+            # 显示当前句子（如果有脚本）
+            current_duration = ""
+            if use_script and script_index < len(sentences):
+                current_item = sentences[script_index]
+                current_sentence = current_item["text"]
+                current_duration = current_item["duration"]
+                print(f"\n📝 句子 {script_index + 1}/{len(sentences)} ({current_duration}):")
+                print(f'   "{current_sentence}"')
+                print()
+
             user_input = input(f"[{count}] 按 Enter 开始录制 (或 q 退出): ")
 
             if user_input.lower() == "q":
@@ -208,16 +297,33 @@ def main() -> None:
             audio = recorder.stop_recording()
 
             if len(audio) > 0:
-                # 保存音频（覆盖同名文件）
+                # 保存音频 - 文件名包含时长
+                if use_script and script_index < len(sentences):
+                    output_path = output_dir / f"test_segment_{count:03d}_{current_duration}.wav"
+                else:
+                    output_path = output_dir / f"test_segment_{count:03d}.wav"
                 save_wav(audio, output_path, args.sample_rate)
                 print(f"  已保存: {output_path}")
                 count += 1
+
+                # 脚本索引递增
+                if use_script:
+                    script_index += 1
+                    # 脚本用完后提示
+                    if script_index >= len(sentences):
+                        print(f"\n✅ 所有脚本句子已录制完成！")
+                        print(f"   共录制 {count} 个片段")
+                        user_input = input("\n继续自由录制？ (y/n, 默认 n): ")
+                        if user_input.lower() != "y":
+                            break
+                        use_script = False
+                        print("\n切换到自由录制模式...")
 
     except KeyboardInterrupt:
         print("\n\n中断退出")
     finally:
         recorder.close()
-        print(f"\n共录制 {count} 次，最终文件: {output_path}")
+        print(f"\n共录制 {count} 个片段")
 
 
 if __name__ == "__main__":

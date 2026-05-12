@@ -63,6 +63,9 @@ SPEAKERS = {
             "大厅回音": "asset/frank/frank 测试_reverb_hall.m4a",
             "低码率": "asset/frank/frank 测试_low_bitrate.m4a",
             "底噪": "asset/frank/frank 测试_noise_hiss.m4a",
+            "混杂+Zhong(100%)": "asset/frank/frank_mixed_zhong_100pct.wav",
+            "混杂+Zhong(50%)": "asset/frank/frank_mixed_zhong_50pct.wav",
+            "混杂+Zhong(20%)": "asset/frank/frank_mixed_zhong_20pct.wav",
         },
     },
     "John": {
@@ -74,6 +77,9 @@ SPEAKERS = {
             "大厅回音": "asset/john/安静环境测试测试_reverb_hall.m4a",
             "低码率": "asset/john/安静环境测试测试_low_bitrate.m4a",
             "底噪": "asset/john/安静环境测试测试_noise_hiss.m4a",
+            "混杂+Qingqing(100%)": "asset/john/john_mixed_qingqing_100pct.wav",
+            "混杂+Qingqing(50%)": "asset/john/john_mixed_qingqing_50pct.wav",
+            "混杂+Qingqing(20%)": "asset/john/john_mixed_qingqing_20pct.wav",
         },
     },
     "Michael": {
@@ -84,6 +90,9 @@ SPEAKERS = {
             "大厅回音": "asset/michael/测试_reverb_hall.m4a",
             "低码率": "asset/michael/测试_low_bitrate.m4a",
             "底噪": "asset/michael/测试_noise_hiss.m4a",
+            "混杂+Xixi(100%)": "asset/michael/michael_mixed_xixi_100pct.wav",
+            "混杂+Xixi(50%)": "asset/michael/michael_mixed_xixi_50pct.wav",
+            "混杂+Xixi(20%)": "asset/michael/michael_mixed_xixi_20pct.wav",
         },
     },
     "Zhong": {
