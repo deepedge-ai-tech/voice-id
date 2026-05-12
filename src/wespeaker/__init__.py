@@ -1,6 +1,10 @@
 """WeSpeaker 声纹识别工具。"""
 
-from . import realtime_monitor
+from . import (
+    diagnostics,
+    realtime_monitor,
+    reporters,
+)
 from .best import (
     BestConfig,
     WespeakerBest,
@@ -26,4 +30,7 @@ __all__ = [
     "_load_model",
     "_vad_segments",
     "realtime_monitor",
+    # 诊断模块
+    "diagnostics",
+    "reporters",
 ]
