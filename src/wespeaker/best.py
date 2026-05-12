@@ -26,6 +26,7 @@
 from __future__ import annotations
 
 import glob
+import logging
 import os
 import pickle
 from dataclasses import dataclass
@@ -35,6 +36,8 @@ from typing import Any
 import numpy as np
 import torch
 import torch.nn.functional as F
+
+logger = logging.getLogger(__name__)
 
 from .wespeaker import (
     WespeakerClient,
@@ -238,6 +241,8 @@ class WespeakerBest:
             raise FileNotFoundError(f"注册目录无有效音频文件: {clean_dir}")
 
         snrs = snr_levels if snr_levels is not None else list(self.config.noise_injection_snrs)
+        logger.info("Enrolling %s with %d clean segments", clean_dir, len(clean_paths))
+        logger.debug("SNR levels: %s", snrs)
         all_embeddings: list[torch.Tensor] = []
 
         for path in clean_paths:
@@ -253,6 +258,13 @@ class WespeakerBest:
         pk_path.parent.mkdir(parents=True, exist_ok=True)
         with open(pk_path, "wb") as f:
             pickle.dump(ref.cpu().numpy(), f)
+
+        logger.info(
+            "Enrolled %s: %d embeddings, dim=%d",
+            clean_dir,
+            len(all_embeddings),
+            ref.numel(),
+        )
 
         return {
             "ok": True,
@@ -321,6 +333,7 @@ class WespeakerBest:
             如果出错，额外包含 error 字段。
         """
         audio_path = str(Path(audio_path))
+        logger.debug("Recognizing %s", audio_path)
         if not Path(audio_path).is_file():
             return {
                 "is_recognized": False,
@@ -366,6 +379,8 @@ class WespeakerBest:
 
         emb = F.normalize(_extract_embedding(self._client._model, pcm), dim=0)
         score = float(torch.dot(emb, ref).clamp(-1.0, 1.0).item())
+
+        logger.debug("Recognition score: %.4f", score)
 
         return {
             "is_recognized": score >= self.config.sim_threshold,
