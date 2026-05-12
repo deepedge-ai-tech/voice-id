@@ -1,19 +1,17 @@
 #!/usr/bin/env python3
-"""声纹交叉测试 — Frank vs John 2x2 识别矩阵。
+"""声纹交叉测试 — 6x6 识别矩阵。
 
 测试场景:
-  注册: Frank (registration_segments), John (registration_segments)
-  测试: Frank (frank 测试.m4a), John (安静环境测试测试.m4a)
+  注册: Frank, John, Michael, Zhong, Xixi, Qingqing
+  测试: 每人原始 + 4种变体音频
 
 预期:
-  - Frank 测试 vs Frank 声纹 → 通过 (sim >= threshold)
-  - John 测试 vs John 声纹 → 通过
-  - Frank 测试 vs John 声纹 → 拒绝 (sim < threshold)
-  - John 测试 vs Frank 声纹 → 拒绝
+  - 正确匹配: 同一人的测试音频 vs 自己的声纹 → 通过
+  - 正确拒绝: 不同人的测试音频 vs 其他人声纹 → 拒绝
 
 用法:
     uv run python scripts/cross_test.py
-    uv run python scripts/cross_test.py --noise asset/john/test_noise_segments/嘈杂环境测试.m4a
+    uv run python scripts/cross_test.py --noise asset/john/嘈杂环境测试.m4a
     uv run python scripts/cross_test.py --snrs 20,15,10,5,0
     uv run python scripts/cross_test.py --threshold 0.50
 """
@@ -38,14 +36,62 @@ SPEAKERS = {
     "Frank": {
         "register_dir": "asset/frank/registration_segments",
         "test_audios": {
-            "frank 测试": "asset/frank/frank 测试.m4a",
+            "原始": "asset/frank/frank 测试.m4a",
+            "电话音效": "asset/frank/frank 测试_eq_phone.m4a",
+            "大厅回音": "asset/frank/frank 测试_reverb_hall.m4a",
+            "低码率": "asset/frank/frank 测试_low_bitrate.m4a",
+            "底噪": "asset/frank/frank 测试_noise_hiss.m4a",
         },
     },
     "John": {
         "register_dir": "asset/john/registration_segments",
         "test_audios": {
-            "安静环境": "asset/john/安静环境测试测试.m4a",
+            "原始": "asset/john/安静环境测试测试.m4a",
             "嘈杂环境": "asset/john/嘈杂环境测试.m4a",
+            "电话音效": "asset/john/安静环境测试测试_eq_phone.m4a",
+            "大厅回音": "asset/john/安静环境测试测试_reverb_hall.m4a",
+            "低码率": "asset/john/安静环境测试测试_low_bitrate.m4a",
+            "底噪": "asset/john/安静环境测试测试_noise_hiss.m4a",
+        },
+    },
+    "Michael": {
+        "register_dir": "asset/michael/registration_segments",
+        "test_audios": {
+            "原始": "asset/michael/测试.wav",
+            "电话音效": "asset/michael/测试_eq_phone.m4a",
+            "大厅回音": "asset/michael/测试_reverb_hall.m4a",
+            "低码率": "asset/michael/测试_low_bitrate.m4a",
+            "底噪": "asset/michael/测试_noise_hiss.m4a",
+        },
+    },
+    "Zhong": {
+        "register_dir": "asset/zhong/registration_segments",
+        "test_audios": {
+            "原始": "asset/zhong/测试.wav",
+            "电话音效": "asset/zhong/测试_eq_phone.m4a",
+            "大厅回音": "asset/zhong/测试_reverb_hall.m4a",
+            "低码率": "asset/zhong/测试_low_bitrate.m4a",
+            "底噪": "asset/zhong/测试_noise_hiss.m4a",
+        },
+    },
+    "Xixi": {
+        "register_dir": "asset/xixi/registration_segments",
+        "test_audios": {
+            "原始": "asset/xixi/测试.wav",
+            "电话音效": "asset/xixi/测试_eq_phone.m4a",
+            "大厅回音": "asset/xixi/测试_reverb_hall.m4a",
+            "低码率": "asset/xixi/测试_low_bitrate.m4a",
+            "底噪": "asset/xixi/测试_noise_hiss.m4a",
+        },
+    },
+    "Qingqing": {
+        "register_dir": "asset/qingqing/registration_segments",
+        "test_audios": {
+            "原始": "asset/qingqing/测试.wav",
+            "电话音效": "asset/qingqing/测试_eq_phone.m4a",
+            "大厅回音": "asset/qingqing/测试_reverb_hall.m4a",
+            "低码率": "asset/qingqing/测试_low_bitrate.m4a",
+            "底噪": "asset/qingqing/测试_noise_hiss.m4a",
         },
     },
 }
@@ -84,7 +130,7 @@ def cross_test(noise_path: str, snr_levels: list[float], threshold: float) -> No
         print(f"  embedding 维度: {result['embedding_dim']}\n")
 
     # 4. 交叉识别矩阵
-    col_headers = ["Frank 声纹", "John 声纹"]
+    col_headers = [f"{name} 声纹" for name in SPEAKERS.keys()]
     col_width = 12
     header = f"{'':>14} | " + " | ".join(f"{h:>{col_width}}" for h in col_headers)
     sep = "-" * len(header)
@@ -134,7 +180,7 @@ def cross_test(noise_path: str, snr_levels: list[float], threshold: float) -> No
 def main() -> None:
     import argparse
 
-    parser = argparse.ArgumentParser(description="声纹交叉测试 — Frank vs John 2x2 矩阵")
+    parser = argparse.ArgumentParser(description="声纹交叉测试 — 6x6 识别矩阵")
     parser.add_argument(
         "--noise",
         default="asset/john/嘈杂环境测试.m4a",
