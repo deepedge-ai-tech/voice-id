@@ -28,9 +28,8 @@ from pedalboard import (
     Reverb,
 )
 from pydub import AudioSegment
-from pydub.effects import low_pass_filter, high_pass_filter
+from pydub.effects import high_pass_filter, low_pass_filter
 from pydub.utils import make_chunks
-
 
 # --------------------------------------------------------------------------- #
 #  变体配置
@@ -172,9 +171,7 @@ def save_audio(audio: np.ndarray, sr: int, path: Path) -> None:
     audio_seg.export(str(path), format="mp4")
 
 
-def generate_variants(
-    source_path: Path, speaker: str, dry_run: bool = False
-) -> dict[str, Path]:
+def generate_variants(source_path: Path, speaker: str, dry_run: bool = False) -> dict[str, Path]:
     """为指定说话人生成所有变体."""
     variants = {}
 
@@ -223,9 +220,7 @@ def generate_variants(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="音频变体生成器 — 为测试音频生成多种效果变体"
-    )
+    parser = argparse.ArgumentParser(description="音频变体生成器 — 为测试音频生成多种效果变体")
     parser.add_argument(
         "--dry-run",
         action="store_true",

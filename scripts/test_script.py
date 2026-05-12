@@ -16,9 +16,8 @@ import sys
 from pathlib import Path
 
 import numpy as np
-import sounddevice as sd
 import scipy.io.wavfile as wavfile
-
+import sounddevice as sd
 
 # --------------------------------------------------------------------------- #
 #  录音器

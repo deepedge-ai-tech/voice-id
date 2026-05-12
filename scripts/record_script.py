@@ -12,13 +12,16 @@
 """
 
 import argparse
+import logging
 import re
 import sys
 from pathlib import Path
 
 import numpy as np
-import sounddevice as sd
 import scipy.io.wavfile as wavfile
+import sounddevice as sd
+
+logger = logging.getLogger(__name__)
 
 
 # --------------------------------------------------------------------------- #
@@ -71,7 +74,7 @@ class InteractiveRecorder:
     def _audio_callback(self, indata, frames, time, status):
         """音频流回调函数。"""
         if status:
-            print(f"音频流状态: {status}", file=sys.stderr)
+            logger.warning("音频流状态: %s", status)
         if self.recording and self.audio_data is not None:
             # 追加音频数据
             current_data = indata[:, 0] if self.channels == 1 else indata

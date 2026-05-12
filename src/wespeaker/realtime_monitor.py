@@ -13,6 +13,7 @@ Usage:
 """
 
 import argparse
+import logging
 import sys
 import time
 from pathlib import Path
@@ -20,6 +21,8 @@ from pathlib import Path
 import numpy as np
 
 from . import wespeaker
+
+logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------- #
 #  Ring Buffer
@@ -317,12 +320,13 @@ def main() -> None:
     # Validate voiceprint file
     vp_path = Path(args.voiceprint)
     if not vp_path.is_file():
-        print(f"错误: 声纹文件不存在: {vp_path}")
-        print(
-            f"请先运行注册: uv run python scripts/best_recognition.py enroll "
-            f"--clean asset/john/registration_segments/ "
-            f"--noise asset/john/test_noise_segments/嘈杂环境测试.m4a "
-            f"--output {vp_path}"
+        logger.error("声纹文件不存在: %s", vp_path)
+        logger.error(
+            "请先运行注册: uv run python scripts/best_recognition.py enroll "
+            "--clean asset/john/registration_segments/ "
+            "--noise asset/john/test_noise_segments/嘈杂环境测试.m4a "
+            "--output %s",
+            vp_path,
         )
         sys.exit(1)
 

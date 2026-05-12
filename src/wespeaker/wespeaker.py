@@ -11,6 +11,7 @@ WespeakerClient — 独立的 WeSpeaker 声纹注册与识别工具。
 
 from __future__ import annotations
 
+import logging
 import pickle
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -20,6 +21,8 @@ from typing import Optional
 import numpy as np
 import torch
 import torch.nn.functional as F
+
+logger = logging.getLogger(__name__)
 
 # --------------------------------------------------------------------------- #
 #  音频加载
@@ -494,7 +497,7 @@ if __name__ == "__main__":
             enable_augmentation=not args.no_aug,
         )
         r = client.mp3_to_pk(args.audio, args.output)
-        print(r)
+        logger.info("注册结果: %s", r)
     elif args.cmd == "recognize":
         client = WespeakerClient(
             model_path=args.model_path,
@@ -502,6 +505,6 @@ if __name__ == "__main__":
             sim_threshold=args.threshold,
         )
         r = client.recognize(args.audio, args.voiceprint)
-        print(r)
+        logger.info("识别结果: %s", r)
     else:
         parser.print_help()
