@@ -149,3 +149,95 @@ class RegistrationDiagnostics:
             "quality_metrics": self.get_quality_metrics(),
             "noise_effects": list(self.noise_effects.values()),
         }
+
+
+@dataclass
+class RecognitionDiagnostics:
+    """识别阶段诊断数据收集."""
+
+    test_speaker: str
+    test_variant: str
+    confidence: float
+    threshold: float = 0.55
+    duration: float = 0.0
+    sample_rate: int = 16000
+    rms_energy: float = 0.0
+    comparisons: list[dict] = field(default_factory=list)
+    preprocessing: dict = field(default_factory=dict)
+    error_analysis: dict = field(default_factory=dict)
+
+    def add_comparison(
+        self,
+        ref_speaker: str,
+        score: float,
+        is_match: bool,
+    ) -> None:
+        """添加与一个参考声纹的比较结果."""
+        self.comparisons.append(
+            {
+                "ref_speaker": ref_speaker,
+                "score": score,
+                "is_match": is_match,
+            }
+        )
+
+    def set_preprocessing_info(
+        self,
+        duration: float,
+        sample_rate: int,
+        rms_energy: float,
+        vad_segments: int | None = None,
+        crop_mode: str | None = None,
+    ) -> None:
+        """设置预处理信息."""
+        self.duration = duration
+        self.sample_rate = sample_rate
+        self.rms_energy = rms_energy
+        self.preprocessing = {
+            "duration_sec": duration,
+            "sample_rate": sample_rate,
+            "rms_energy": rms_energy,
+            "vad_segments": vad_segments,
+            "crop_mode": crop_mode,
+        }
+
+    def record_false_positive(
+        self,
+        mistaken_speaker: str,
+        score: float,
+    ) -> None:
+        """记录误接受案例."""
+        self.error_analysis["false_positive"] = {
+            "mistaken_as": mistaken_speaker,
+            "score": score,
+            "threshold_distance": score - self.threshold,
+        }
+
+    def record_false_negative(
+        self,
+        score: float,
+    ) -> None:
+        """记录误拒绝案例."""
+        self.error_analysis["false_negative"] = {
+            "score": score,
+            "threshold_distance": self.threshold - score,
+        }
+
+    def to_dict(self) -> dict:
+        """导出为字典."""
+        # 计算 Top-2 相似度差异
+        scores = [c["score"] for c in self.comparisons]
+        sorted_scores = sorted(scores, reverse=True)
+        top2_diff = sorted_scores[0] - sorted_scores[1] if len(sorted_scores) >= 2 else 0.0
+
+        return {
+            "test_speaker": self.test_speaker,
+            "test_variant": self.test_variant,
+            "confidence": self.confidence,
+            "threshold": self.threshold,
+            "is_correct": self.error_analysis == {},
+            "preprocessing": self.preprocessing,
+            "comparisons": self.comparisons,
+            "top2_similarity_diff": top2_diff,
+            "error_analysis": self.error_analysis,
+        }
