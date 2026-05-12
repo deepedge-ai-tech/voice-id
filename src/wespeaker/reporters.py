@@ -154,14 +154,16 @@ class MarkdownReportGenerator:
             lines.extend(self._registration_section(speaker, reg_data))
 
         # 识别阶段分析
-        lines.extend([
-            "\n## 识别阶段分析",
-            self._performance_section(data.get("recognition", {})),
-            self._error_cases_section(data.get("recognition", {})),
-            self._variant_analysis_section(data.get("recognition", {})),
-            "\n## 结论与建议",
-            self._conclusions_section(data),
-        ])
+        lines.extend(
+            [
+                "\n## 识别阶段分析",
+                self._performance_section(data.get("recognition", {})),
+                self._error_cases_section(data.get("recognition", {})),
+                self._variant_analysis_section(data.get("recognition", {})),
+                "\n## 结论与建议",
+                self._conclusions_section(data),
+            ]
+        )
 
         return "\n".join(lines)
 
@@ -185,10 +187,14 @@ class MarkdownReportGenerator:
             lines.append("\n**向量质量指标:**")
             if "l2_norms" in quality:
                 norms = quality["l2_norms"]
-                lines.append(f"- L2 范数: min={norms['min']:.4f}, max={norms['max']:.4f}, mean={norms['mean']:.4f}")
+                lines.append(
+                    f"- L2 范数: min={norms['min']:.4f}, max={norms['max']:.4f}, mean={norms['mean']:.4f}"
+                )
             if "cosine_distances" in quality:
                 dists = quality["cosine_distances"]
-                lines.append(f"- 余弦距离: min={dists['min']:.4f}, max={dists['max']:.4f}, std={dists['std']:.4f}")
+                lines.append(
+                    f"- 余弦距离: min={dists['min']:.4f}, max={dists['max']:.4f}, std={dists['std']:.4f}"
+                )
             if "within_class_compactness" in quality:
                 lines.append(f"- 类内紧密度: {quality['within_class_compactness']:.4f}")
 
@@ -196,7 +202,9 @@ class MarkdownReportGenerator:
             lines.append("\n**噪声注入效果:**")
             for effect in data["noise_effects"]:
                 snr = effect["target_snr"]
-                lines.append(f"- SNR {snr}dB: 原始RMS={effect['original_rms']:.4f}, 混合RMS={effect['mixed_rms']:.4f}")
+                lines.append(
+                    f"- SNR {snr}dB: 原始RMS={effect['original_rms']:.4f}, 混合RMS={effect['mixed_rms']:.4f}"
+                )
 
         return lines
 
@@ -245,12 +253,16 @@ class MarkdownReportGenerator:
         if fas:
             lines.append(f"\n**误接受 ({len(fas)} 例):**")
             for fa in fas:
-                lines.append(f"- {fa['test_speaker']} 被误认为 {fa['mistaken_as']}: 得分={fa['score']:.4f}, 距离={fa['threshold_distance']:.4f}")
+                lines.append(
+                    f"- {fa['test_speaker']} 被误认为 {fa['mistaken_as']}: 得分={fa['score']:.4f}, 距离={fa['threshold_distance']:.4f}"
+                )
 
         if frs:
             lines.append(f"\n**误拒绝 ({len(frs)} 例):**")
             for fr in frs:
-                lines.append(f"- {fr['test_speaker']} ({fr['test_variant']}): 得分={fr['score']:.4f}, 距离={fr['threshold_distance']:.4f}")
+                lines.append(
+                    f"- {fr['test_speaker']} ({fr['test_variant']}): 得分={fr['score']:.4f}, 距离={fr['threshold_distance']:.4f}"
+                )
 
         if not fas and not frs:
             lines.append("\n无错误案例")
@@ -309,7 +321,7 @@ class MarkdownReportGenerator:
                 lines.append(f"⚠️ 存在 {len(frs)} 例误拒绝 - 建议降低阈值或改进注册质量")
 
         threshold = data.get("meta", {}).get("threshold", 0.55)
-        if frs:
+        if frs and fas:
             min_score = min(fa.get("score", 0) for fa in fas)
             lines.append(f"\n建议阈值范围: {min_score:.2f} - {threshold:.2f}")
 
