@@ -92,7 +92,7 @@ logger = logging.getLogger(__name__)
 ### 5. 输出文件结构
 
 ```
-outputs/
+experiment_log/
 ├── cross_test_report_YYYYMMDD_HHMMSS.md    # Markdown 报告
 ├── cross_test_data_YYYYMMDD_HHMMSS.json    # JSON 原始数据
 └── cross_test_debug_YYYYMMDD_HHMMSS.log    # Debug 日志（仅 --debug）
@@ -187,7 +187,7 @@ outputs/
 --noise
 --snrs
 --threshold
---output-dir
+--output-dir    # 默认值改为 experiment_log/
 
 # 新增参数
 --verbose    # 详细输出模式
