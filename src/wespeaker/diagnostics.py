@@ -3,7 +3,16 @@
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
+from typing import TYPE_CHECKING
+
+import numpy as np
+import torch
+import torch.nn.functional as F
+
+if TYPE_CHECKING:
+    pass
 
 
 @dataclass
@@ -50,4 +59,93 @@ class PerformanceMetrics:
                 }
                 for op in self._timings
             },
+        }
+
+
+@dataclass
+class RegistrationDiagnostics:
+    """注册阶段诊断数据收集."""
+
+    speaker: str
+    segments: list[dict] = field(default_factory=list)
+    embeddings: list[torch.Tensor] = field(default_factory=list)
+    noise_effects: dict[str, dict] = field(default_factory=dict)
+
+    def add_segment(
+        self,
+        filename: str,
+        duration: float,
+        sample_rate: int,
+        embedding: torch.Tensor,
+    ) -> None:
+        """添加一个注册片段的信息."""
+        self.segments.append(
+            {
+                "filename": filename,
+                "duration": duration,
+                "sample_rate": sample_rate,
+            }
+        )
+        self.embeddings.append(embedding)
+
+    def record_noise_injection(
+        self,
+        snr_level: float,
+        original_rms: float,
+        mixed_rms: float,
+        actual_snr: float | None = None,
+    ) -> None:
+        """记录噪声注入效果."""
+        key = f"snr_{snr_level}"
+        if key not in self.noise_effects:
+            self.noise_effects[key] = {
+                "target_snr": snr_level,
+                "original_rms": original_rms,
+                "mixed_rms": mixed_rms,
+                "actual_snr": actual_snr,
+            }
+
+    def get_quality_metrics(self) -> dict:
+        """计算向量质量指标."""
+        if not self.embeddings:
+            return {}
+
+        stacked = torch.stack(self.embeddings)
+        mean_emb = stacked.mean(dim=0)
+        mean_emb_norm = F.normalize(mean_emb.unsqueeze(0), dim=0).squeeze(0)
+
+        # 每个 embedding 的范数
+        norms = [float(emb.norm()) for emb in self.embeddings]
+
+        # 与均值的余弦距离
+        distances = []
+        for emb in self.embeddings:
+            emb_norm = F.normalize(emb.unsqueeze(0), dim=0).squeeze(0)
+            dist = 1.0 - float(torch.dot(emb_norm, mean_emb_norm))
+            distances.append(dist)
+
+        return {
+            "l2_norms": {
+                "min": min(norms),
+                "max": max(norms),
+                "mean": sum(norms) / len(norms),
+            },
+            "cosine_distances": {
+                "min": min(distances),
+                "max": max(distances),
+                "std": np.std(distances).item(),
+            },
+            "within_class_compactness": sum(distances) / len(distances),
+        }
+
+    def to_dict(self) -> dict:
+        """导出为字典（用于 JSON 序列化）."""
+        return {
+            "speaker": self.speaker,
+            "num_segments": len(self.segments),
+            "segments": self.segments,
+            "embedding_dim": self.embeddings[0].numel() if self.embeddings else 0,
+            "total_embeddings": len(self.embeddings),
+            "quality_metrics": self.get_quality_metrics(),
+            "noise_effects": list(self.noise_effects.values()),
         }
