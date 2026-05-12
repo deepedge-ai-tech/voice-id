@@ -234,7 +234,44 @@ class MarkdownReportGenerator:
             for op, stats in timings.items():
                 lines.append(f"- {op}: {stats['avg_time']:.4f}s (x{stats['count']})")
 
+        # 添加VAD处理统计
+        test_cases = data.get("test_cases", [])
+        vad_stats = self._compute_vad_stats(test_cases)
+        if vad_stats:
+            lines.append("\n**VAD处理统计:**")
+            lines.append(f"- 原始音频平均时长: {vad_stats['avg_original']:.2f}s")
+            lines.append(f"- VAD处理后平均时长: {vad_stats['avg_vad']:.2f}s")
+            lines.append(f"- 平均保留比例: {vad_stats['avg_ratio']:.1f}%")
+
         return "\n".join(lines)
+
+    def _compute_vad_stats(self, test_cases: list) -> dict:
+        """计算VAD处理统计数据."""
+        import numpy as np
+
+        original_durations = []
+        vad_durations = []
+        ratios = []
+
+        for case in test_cases:
+            prep = case.get("preprocessing", {})
+            orig = prep.get("original_duration")
+            vad = prep.get("vad_duration")
+            if orig is not None and vad is not None and orig > 0:
+                original_durations.append(orig)
+                vad_durations.append(vad)
+                ratios.append(vad / orig * 100)
+
+        if not original_durations:
+            return {}
+
+        return {
+            "avg_original": np.mean(original_durations),
+            "avg_vad": np.mean(vad_durations),
+            "avg_ratio": np.mean(ratios),
+            "min_ratio": np.min(ratios) if ratios else 0,
+            "max_ratio": np.max(ratios) if ratios else 0,
+        }
 
     def _error_cases_section(self, data: dict) -> str:
         """生成错误案例分析.
@@ -246,6 +283,13 @@ class MarkdownReportGenerator:
             Markdown 格式的错误案例分析文本
         """
         errors = data.get("errors", {})
+        test_cases = data.get("test_cases", [])
+        # 创建测试案例查找索引
+        case_lookup = {
+            (tc.get("test_speaker"), tc.get("test_variant")): tc
+            for tc in test_cases
+        }
+
         lines = ["\n### 错误案例分析"]
 
         fas = errors.get("false_accepts", [])
@@ -261,8 +305,21 @@ class MarkdownReportGenerator:
         if frs:
             lines.append(f"\n**误拒绝 ({len(frs)} 例):**")
             for fr in frs:
+                # 查找对应的测试案例获取VAD信息
+                case_key = (fr.get("test_speaker"), fr.get("test_variant"))
+                case = case_lookup.get(case_key, {})
+                prep = case.get("preprocessing", {})
+                orig = prep.get("original_duration")
+                vad = prep.get("vad_duration")
+
+                # 构建VAD信息字符串
+                vad_info = ""
+                if orig is not None and vad is not None:
+                    ratio = (vad / orig * 100) if orig > 0 else 0
+                    vad_info = f", 原始时长={orig:.2f}s, VAD后={vad:.2f}s (保留{ratio:.0f}%)"
+
                 lines.append(
-                    f"- {fr['test_speaker']} ({fr['test_variant']}): 得分={fr['score']:.4f}, 距离={fr['threshold_distance']:.4f}"
+                    f"- {fr['test_speaker']} ({fr['test_variant']}): 得分={fr['score']:.4f}, 距离={fr['threshold_distance']:.4f}{vad_info}"
                 )
 
         if not fas and not frs:

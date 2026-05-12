@@ -12,6 +12,7 @@ dependencies = [
     "pyannote-audio>=4.0.4",
     "pydub>=0.25.0",
     "scipy>=1.0",
+    "silero-vad>=5.1.2",
     "sounddevice>=0.4",
     "torch>=2.11.0",
     "torchaudio>=2.11.0",

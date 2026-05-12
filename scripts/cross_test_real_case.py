@@ -1,14 +1,13 @@
 #!/usr/bin/env python3
-"""声纹交叉测试 — 2x2 识别矩阵 (John & Xixi)。
+"""声纹交叉测试 — 6x6 识别矩阵。
 
 测试场景:
-  注册: John, Xixi (使用 registration_segments 目录)
-  测试: 每人的 test_segments 目录中所有片段，每个片段单独测试
-  裁剪: 超过 2 秒的音频只保留前 2 秒
+  注册: Frank, John, Michael, Zhong, Xixi, Qingqing
+  测试: 每人原始 + 4种变体音频
 
 预期:
-  - 正确匹配: 同一人的测试片段 vs 自己的声纹 → 通过
-  - 正确拒绝: 不同人的测试片段 vs 其他人声纹 → 拒绝
+  - 正确匹配: 同一人的测试音频 vs 自己的声纹 → 通过
+  - 正确拒绝: 不同人的测试音频 vs 其他人声纹 → 拒绝
 
 用法:
     uv run python scripts/cross_test.py
@@ -35,7 +34,8 @@ import torch
 import torch.nn.functional as F
 
 from src.wespeaker import WespeakerBest
-from src.wespeaker.wespeaker import _apply_silero_vad, _crop_to_duration
+
+from src.wespeaker.wespeaker_real_case import WespeakerBest2s as WespeakerBest
 from src.wespeaker.diagnostics import (
     PerformanceMetrics,
     RecognitionDiagnostics,
@@ -57,13 +57,75 @@ plt.rcParams["axes.unicode_minus"] = False
 # --------------------------------------------------------------------------- #
 
 SPEAKERS = {
+    "Frank": {
+        "register_dir": "asset/frank/registration_segments",
+        "test_audios": {
+            "原始": "asset/frank/frank 测试.m4a",
+            "电话音效": "asset/frank/frank 测试_eq_phone.m4a",
+            "大厅回音": "asset/frank/frank 测试_reverb_hall.m4a",
+            "低码率": "asset/frank/frank 测试_low_bitrate.m4a",
+            "底噪": "asset/frank/frank 测试_noise_hiss.m4a",
+            "混杂+Zhong(100%)": "asset/frank/frank_mixed_zhong_100pct.wav",
+            "混杂+Zhong(50%)": "asset/frank/frank_mixed_zhong_50pct.wav",
+            "混杂+Zhong(20%)": "asset/frank/frank_mixed_zhong_20pct.wav",
+        },
+    },
     "John": {
         "register_dir": "asset/john/registration_segments",
-        "test_segments_dir": "asset/john/test_segments",
+        "test_audios": {
+            "原始": "asset/john/安静环境测试测试.m4a",
+            "嘈杂环境": "asset/john/嘈杂环境测试.m4a",
+            "电话音效": "asset/john/安静环境测试测试_eq_phone.m4a",
+            "大厅回音": "asset/john/安静环境测试测试_reverb_hall.m4a",
+            "低码率": "asset/john/安静环境测试测试_low_bitrate.m4a",
+            "底噪": "asset/john/安静环境测试测试_noise_hiss.m4a",
+            "混杂+Qingqing(100%)": "asset/john/john_mixed_qingqing_100pct.wav",
+            "混杂+Qingqing(50%)": "asset/john/john_mixed_qingqing_50pct.wav",
+            "混杂+Qingqing(20%)": "asset/john/john_mixed_qingqing_20pct.wav",
+        },
+    },
+    "Michael": {
+        "register_dir": "asset/michael/registration_segments",
+        "test_audios": {
+            "原始": "asset/michael/测试.wav",
+            "电话音效": "asset/michael/测试_eq_phone.m4a",
+            "大厅回音": "asset/michael/测试_reverb_hall.m4a",
+            "低码率": "asset/michael/测试_low_bitrate.m4a",
+            "底噪": "asset/michael/测试_noise_hiss.m4a",
+            "混杂+Xixi(100%)": "asset/michael/michael_mixed_xixi_100pct.wav",
+            "混杂+Xixi(50%)": "asset/michael/michael_mixed_xixi_50pct.wav",
+            "混杂+Xixi(20%)": "asset/michael/michael_mixed_xixi_20pct.wav",
+        },
+    },
+    "Zhong": {
+        "register_dir": "asset/zhong/registration_segments",
+        "test_audios": {
+            "原始": "asset/zhong/测试.wav",
+            "电话音效": "asset/zhong/测试_eq_phone.m4a",
+            "大厅回音": "asset/zhong/测试_reverb_hall.m4a",
+            "低码率": "asset/zhong/测试_low_bitrate.m4a",
+            "底噪": "asset/zhong/测试_noise_hiss.m4a",
+        },
     },
     "Xixi": {
         "register_dir": "asset/xixi/registration_segments",
-        "test_segments_dir": "asset/xixi/test_segments",
+        "test_audios": {
+            "原始": "asset/xixi/测试.wav",
+            "电话音效": "asset/xixi/测试_eq_phone.m4a",
+            "大厅回音": "asset/xixi/测试_reverb_hall.m4a",
+            "低码率": "asset/xixi/测试_low_bitrate.m4a",
+            "底噪": "asset/xixi/测试_noise_hiss.m4a",
+        },
+    },
+    "Qingqing": {
+        "register_dir": "asset/qingqing/registration_segments",
+        "test_audios": {
+            "原始": "asset/qingqing/测试.wav",
+            "电话音效": "asset/qingqing/测试_eq_phone.m4a",
+            "大厅回音": "asset/qingqing/测试_reverb_hall.m4a",
+            "低码率": "asset/qingqing/测试_low_bitrate.m4a",
+            "底噪": "asset/qingqing/测试_noise_hiss.m4a",
+        },
     },
 }
 
@@ -305,11 +367,7 @@ def cross_test(
     diagonal_scores: dict[str, list[float]] = {name: [] for name in SPEAKERS.keys()}
 
     for test_speaker, speaker_data in SPEAKERS.items():
-        test_dir = Path(speaker_data["test_segments_dir"])
-        test_files = sorted(test_dir.glob("*.wav"))
-
-        for audio_file in test_files:
-            label = audio_file.name
+        for label, audio_path in speaker_data["test_audios"].items():
             row_label = f"{test_speaker}/{label}"
             row_labels.append(row_label)
             row_scores: list[float] = []
@@ -326,42 +384,19 @@ def cross_test(
             # 加载测试音频获取预处理信息
             import torchaudio
 
-            waveform, sr = torchaudio.load(audio_file)
-            original_duration = waveform.shape[1] / sr
-
-            # 转换为单声道
-            waveform_mono = waveform.mean(dim=0)
-
-            # 先用 Silero VAD 去除静音
-            waveform_vad = _apply_silero_vad(waveform_mono, sr)
-            vad_duration = waveform_vad.shape[0] / sr
-
-            # 再裁剪到 2 秒
-            waveform_final = _crop_to_duration(waveform_vad, 2.0, sr)
-            final_duration = waveform_final.shape[0] / sr
-
-            rms_energy = float(waveform_final.norm())
-            # 设置预处理信息（包含VAD前后的时长）
-            recog_diag.set_preprocessing_info(
-                duration=final_duration,
-                sample_rate=sr,
-                rms_energy=rms_energy,
-                original_duration=original_duration,
-                vad_duration=vad_duration,
-            )
-
-            # 保存裁剪后的音频到临时文件用于识别
-            temp_audio_path = tmp_pk.parent / "temp_test_audio.wav"
-            torchaudio.save(str(temp_audio_path), waveform_final.unsqueeze(0), sr)
+            waveform, sr = torchaudio.load(audio_path)
+            duration = waveform.shape[1] / sr
+            rms_energy = float(waveform.norm())
+            recog_diag.set_preprocessing_info(duration, sr, rms_energy)
 
             if verbose:
-                row = f"{row_label:>30} |"
+                row = f"{row_label:>14} |"
 
             for ref_name, ref_emb in voiceprints.items():
                 with open(tmp_pk, "wb") as f:
                     pickle.dump(ref_emb.cpu().numpy(), f)
 
-                result = recognizer.recognize(str(temp_audio_path), str(tmp_pk))
+                result = recognizer.recognize(audio_path, str(tmp_pk))
                 score = result["confidence"]
                 is_match = result["is_recognized"]
 
@@ -483,7 +518,7 @@ def cross_test(
 def main() -> None:
     import argparse
 
-    parser = argparse.ArgumentParser(description="声纹交叉测试 — 2x2 识别矩阵 (John & Xixi)")
+    parser = argparse.ArgumentParser(description="声纹交叉测试 — 6x6 识别矩阵")
     parser.add_argument(
         "--noise",
         default="asset/john/嘈杂环境测试.m4a",
@@ -529,14 +564,10 @@ def main() -> None:
         if not reg_dir.is_dir():
             print(f"错误: 注册目录不存在: {reg_dir}")
             sys.exit(1)
-        test_dir = Path(speaker_data["test_segments_dir"])
-        if not test_dir.is_dir():
-            print(f"错误: 测试片段目录不存在: {test_dir}")
-            sys.exit(1)
-        # 检查是否有 wav 文件
-        if not list(test_dir.glob("*.wav")):
-            print(f"错误: 测试片段目录中没有 .wav 文件: {test_dir}")
-            sys.exit(1)
+        for label, audio_path in speaker_data["test_audios"].items():
+            if not Path(audio_path).is_file():
+                print(f"错误: 测试音频不存在: {audio_path}")
+                sys.exit(1)
     if not Path(args.noise).is_file():
         print(f"错误: 噪声音频不存在: {args.noise}")
         sys.exit(1)

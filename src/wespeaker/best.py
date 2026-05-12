@@ -41,6 +41,7 @@ logger = logging.getLogger(__name__)
 
 from .wespeaker import (
     WespeakerClient,
+    _apply_silero_vad,
     _extract_embedding,
     _load_audio,
     _vad_segments,
@@ -246,7 +247,10 @@ class WespeakerBest:
         all_embeddings: list[torch.Tensor] = []
 
         for path in clean_paths:
-            seg = _load_audio(path, self._client.sample_rate).cpu().numpy()
+            seg = _load_audio(path, self._client.sample_rate)
+            # 应用 Silero VAD 去除静音
+            seg_vad = _apply_silero_vad(seg, self._client.sample_rate)
+            seg = seg_vad.cpu().numpy()
             for snr in snrs:
                 mixed = _mix_noise_at_snr(seg, noise_profile, snr)
                 emb = _extract_embedding(self._client._model, torch.from_numpy(mixed))

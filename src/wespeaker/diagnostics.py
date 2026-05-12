@@ -188,8 +188,20 @@ class RecognitionDiagnostics:
         rms_energy: float,
         vad_segments: int | None = None,
         crop_mode: str | None = None,
+        original_duration: float | None = None,
+        vad_duration: float | None = None,
     ) -> None:
-        """设置预处理信息."""
+        """设置预处理信息.
+
+        Args:
+            duration: 最终处理后的音频时长（秒）
+            sample_rate: 采样率
+            rms_energy: RMS能量值
+            vad_segments: VAD检测到的语音段数量
+            crop_mode: 裁剪模式
+            original_duration: VAD处理前的原始音频时长（秒）
+            vad_duration: VAD处理后的音频时长（秒）
+        """
         self.duration = duration
         self.sample_rate = sample_rate
         self.rms_energy = rms_energy
@@ -199,6 +211,8 @@ class RecognitionDiagnostics:
             "rms_energy": rms_energy,
             "vad_segments": vad_segments,
             "crop_mode": crop_mode,
+            "original_duration": original_duration,
+            "vad_duration": vad_duration,
         }
 
     def record_false_positive(
