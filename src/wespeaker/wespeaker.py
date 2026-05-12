@@ -32,16 +32,20 @@ logger = logging.getLogger(__name__)
 def _load_audio(path: str, target_sr: int = 16000) -> torch.Tensor:
     """读取音频文件 → 单声道 → 目标采样率 → float32 [-1,1] waveform."""
     path = str(Path(path).expanduser())
+    logger.debug("Loading audio: %s (target_sr=%d)", path, target_sr)
+
     # 优先 torchaudio（支持 mp3/wav/ogg，需 ffmpeg）
     try:
         import torchaudio
 
         waveform, sr = torchaudio.load(path)
+        logger.debug("Loaded with torchaudio: sr=%d, shape=%s", sr, waveform.shape)
         if sr != target_sr:
             waveform = torchaudio.functional.resample(waveform, sr, target_sr)
         waveform = waveform.mean(dim=0)  # mono
         return waveform
     except Exception:
+        logger.warning("torchaudio failed for %s, trying librosa", path)
         pass
     # fallback: librosa
     try:
@@ -85,9 +89,11 @@ def _load_model(model_path: str, device: str) -> torch.nn.Module:
 def _extract_embedding(model: torch.nn.Module, waveform: torch.Tensor) -> torch.Tensor:
     """从 waveform 提取 256 维 embedding."""
     device = next(model.parameters()).device
+    logger.debug("Extracting embedding: waveform shape=%s", waveform.shape)
     with torch.no_grad():
         x = waveform.to(device).unsqueeze(0).unsqueeze(0)  # (1,1,T)
         emb = model(x)  # (1, 256)
+        logger.debug("Extracted embedding shape: %s", emb.shape)
         return emb.squeeze(0).cpu()
 
 
@@ -285,6 +291,7 @@ class WespeakerClient:
 
     def mp3_to_pk(self, mp3_path: str, pk_path: str) -> dict:
         """从音频文件注册声纹 → 保存 .pkl 文件."""
+        logger.info("Enrolling voiceprint from %s", mp3_path)
         if not Path(mp3_path).is_file():
             return {"ok": False, "error": f"文件不存在: {mp3_path}"}
 
@@ -333,6 +340,7 @@ class WespeakerClient:
         with open(out, "wb") as f:
             pickle.dump(mean_emb.cpu().numpy(), f)
 
+        logger.info("Voiceprint enrolled: %d segments, dim=%d", len(segments), mean_emb.numel())
         return {
             "ok": True,
             "num_segments": len(segments),
@@ -342,6 +350,7 @@ class WespeakerClient:
 
     def recognize(self, audio_path: str, pk_path: str) -> dict:
         """将音频与已保存的声纹比对，返回识别结果."""
+        logger.info("Recognizing %s against %s", audio_path, pk_path)
         if not Path(audio_path).is_file():
             return {"is_recognized": False, "confidence": 0.0, "error": f"文件不存在: {audio_path}"}
         if not Path(pk_path).is_file():
@@ -387,6 +396,7 @@ class WespeakerClient:
         emb = F.normalize(emb, dim=0)
         score = float(torch.dot(emb, ref).clamp(-1.0, 1.0).item())
 
+        logger.debug("Recognition score: %.4f (threshold=%.2f)", score, self.sim_threshold)
         return {
             "is_recognized": score >= self.sim_threshold,
             "confidence": round(score, 4),
