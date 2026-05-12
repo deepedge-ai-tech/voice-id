@@ -1,39 +1,38 @@
-# Roadmap 图
+# 项目开发 Roadmap (Project Roadmap)
 
 ```mermaid
-graph LR
-    subgraph Phase1["Phase 1: 核心功能"]
-        A[WeSpeakerClient 类]
-        B[注册功能 enroll]
-        C[识别功能 recognize]
-        D[CLI 入口]
-    end
+gantt
+    title WeSpeaker 声纹识别工具开发计划
+    dateFormat  YYYY-MM-DD
+    axisFormat  %m/%d
 
-    subgraph Phase2["Phase 2: 工具链"]
-        E[音频切分脚本]
-        F[滑动窗口测试]
-        G[实验日志系统]
-    end
+    section 基础设施
+    项目初始化           :done,    init,      2025-01-01, 2d
+    环境配置 uv sync     :done,    env,       after init, 1d
+    模型下载与测试       :done,    model,     after env, 2d
 
-    subgraph Phase3["Phase 3: 优化"]
-        H[多场景注册]
-        I[滑动窗口优化]
-        J[阈值自动调优]
-    end
+    section 核心开发
+    WespeakerClient 类   :done,    client,    after model, 3d
+    注册功能 enroll      :done,    enroll,    after client, 2d
+    识别功能 recognize   :done,    recognize, after enroll, 2d
+    CLI 入口实现         :done,    cli,       after recognize, 1d
 
-    subgraph Phase4["Phase 4: 工程化"]
-        K[单元测试覆盖]
-        L[CI/CD 流程]
-        M[性能优化]
-    end
+    section 音频处理
+    Silero VAD 集成      :done,    vad,       after cli, 2d
+    SNR 估计实现         :done,    snr,       after vad, 2d
+    噪声增强模块         :done,    augment,   after snr, 2d
 
-    A --> B --> C --> D
-    D --> E --> F --> G
-    G --> H --> I --> J
-    J --> K --> L --> M
+    section 工具脚本
+    音频切分脚本         :done,    split,     after augment, 1d
+    滑动窗口测试         :done,    sliding,   after split, 2d
+    最佳配置脚本         :done,    best,      after sliding, 2d
 
-    style Phase1 fill:#e3f2fd
-    style Phase2 fill:#fff3e0
-    style Phase3 fill:#e8f5e9
-    style Phase4 fill:#f3e5f5
+    section 测试优化
+    单元测试编写         :done,    test,      after best, 3d
+    实验与参数调优       :done,    exp,       after test, 5d
+    文档与图表完善       :active,  doc,       after exp, 2d
+
+    section 持续改进
+    性能优化            :         perf,      after doc, 3d
+    实时声纹监控        :         realtime,  after perf, 3d
 ```

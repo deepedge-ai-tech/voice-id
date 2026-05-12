@@ -1,59 +1,55 @@
-# 技术栈图
+# 技术栈图 (Tech Stack Diagram)
 
 ```mermaid
-graph LR
-    subgraph Language["语言"]
-        A[Python 3.12+]
+graph TB
+    classDef backend fill:#e1f5fe,stroke:#0288d1,stroke-width:2px;
+    classDef infra fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px;
+    classDef devops fill:#e8f5e9,stroke:#388e3c,stroke-width:2px;
+    classDef audio fill:#fff3e0,stroke:#f57c00,stroke-width:2px;
+
+    subgraph 后端技术栈
+        Python[Python 3.12+]:::backend
+        Type[类型注解 typing]:::backend
+        Data[dataclass 数据类]:::backend
     end
 
-    subgraph Package["包管理"]
-        B[uv]
+    subgraph 深度学习框架
+        Torch[PyTorch 2.x]:::backend
+        TorchAudio[torchaudio 音频处理]:::backend
+        Pyannote[pyannote.audio ResNet34]:::backend
     end
 
-    subgraph DL["深度学习"]
-        C[PyTorch 2.x]
-        D[torchaudio]
+    subgraph 音频处理
+        Librosa[librosa 音频加载]:::audio
+        Silero[silero-vad VAD 检测]:::audio
+        Augment[audiomentations 噪声增强]:::audio
     end
 
-    subgraph Voice["声纹"]
-        E[pyannote.audio<br/>ResNet34]
+    subgraph 数据存储
+        Pkl[(Pickle 声纹存储)]:::infra
+        Model[(本地模型 models/)]:::infra
     end
 
-    subarray Math["数值计算"]
-        F[numpy]
+    subgraph 开发运维
+        UV[uv 包管理]:::devops
+        Pytest[pytest 测试框架]:::devops
+        Cov[pytest-cov 覆盖率]:::devops
+        Black[black 格式化]:::devops
+        Isort[isort 导入排序]:::devops
     end
 
-    subgraph Test["测试"]
-        G[pytest]
-        H[pytest-cov]
-    end
-
-    subgraph Quality["代码质量"]
-        I[black]
-        J[isort]
-    end
-
-    subgraph Audio["音频增强"]
-        K[audiomentations]
-    end
-
-    A --> B
-    B --> C
-    B --> D
-    B --> E
-    B --> F
-    B --> G
-    B --> H
-    B --> I
-    B --> J
-    B --> K
-
-    style Language fill:#e3f2fd
-    style Package fill:#fff3e0
-    style DL fill:#f3e5f5
-    style Voice fill:#e8f5e9
-    style Math fill:#fce4ec
-    style Test fill:#e0f7fa
-    style Quality fill:#f1f8e9
-    style Audio fill:#fff8e1
+    Python --> Type
+    Python --> Data
+    Torch --> TorchAudio
+    Torch --> Pyannote
+    Librosa --> TorchAudio
+    Silero --> Torch
+    Augment --> Torch
+    Pyannote --> Pkl
+    Pyannote --> Model
+    Python --> UV
+    UV --> Pytest
+    UV --> Cov
+    UV --> Black
+    UV --> Isort
 ```

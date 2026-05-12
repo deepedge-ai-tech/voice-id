@@ -1,30 +1,50 @@
-# 数据流图
+# 数据流图 (Data Flow Diagram)
 
 ```mermaid
 flowchart LR
-    subgraph Registration["注册流程"]
-        A1[音频文件] --> A2[加载音频]
-        A2 --> A3[重采样 16kHz]
-        A3 --> A4[切分为 1s 片段]
-        A4 --> A5[噪声增强<br/>可选]
-        A5 --> A6[提取 Embedding]
-        A6 --> A7[均值 + 归一化]
-        A7 --> A8[保存 .pkl]
+    classDef source fill:#fce4ec,stroke:#c2185b,stroke-width:2px;
+    classDef process fill:#e1f5fe,stroke:#0288d1,stroke-width:2px;
+    classDef store fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px;
+    classDef output fill:#e8f5e9,stroke:#388e3c,stroke-width:2px;
+    classDef external fill:#fff3e0,stroke:#f57c00,stroke-width:2px;
+
+    subgraph 注册流程
+        RegAudio([注册音频 .wav/.m4a]):::source
+        RegLoad[音频加载 16kHz mono]:::process
+        RegSplit[切分 1s 片段]:::process
+        RegAug[噪声增强 可选]:::external
+        RegEmb[提取 Embedding]:::process
+        RegAvg[均值 + 归一化]:::process
+        RegSave[(保存 .pkl)]:::store
+
+        RegAudio -->|音频数据| RegLoad
+        RegLoad -->|waveform| RegSplit
+        RegSplit -->|片段列表| RegAug
+        RegAug -->|增强后片段| RegEmb
+        RegEmb -->|embeddings| RegAvg
+        RegAvg -->|最终向量| RegSave
     end
 
-    subgraph Recognition["识别流程"]
-        B1[测试音频] --> B2[加载音频]
-        B2 --> B3[裁剪窗口<br/>tail/head/full]
-        B3 --> B4[提取 Embedding]
-        B4 --> B5[加载参考 .pkl]
-        B5 --> B6[余弦相似度]
-        B6 --> B7{分数 >= 阈值?}
-        B7 -->|是| B8[识别成功]
-        B7 -->|否| B9[识别失败]
+    subgraph 识别流程
+        RecAudio([测试音频]):::source
+        RecLoad[音频加载]:::process
+        RecCrop[裁剪窗口 VAD]:::process
+        RecEmb[提取 Embedding]:::process
+        RecLoad[(加载 .pkl)]:::store
+        RecSim[余弦相似度计算]:::process
+        RecDec{分数 >= 阈值?}:::output
+        RecPass([识别成功]):::output
+        RecFail([识别失败]):::output
+
+        RecAudio -->|音频数据| RecLoad
+        RecLoad -->|waveform| RecCrop
+        RecCrop -->|处理后音频| RecEmb
+        RecEmb -->|embedding| RecSim
+        RecLoad -->|参考向量| RecSim
+        RecSim -->|相似度分数| RecDec
+        RecDec -->|是| RecPass
+        RecDec -->|否| RecFail
     end
 
-    A8 -.-> B5
-
-    style Registration fill:#e3f2fd
-    style Recognition fill:#f3e5f5
+    RegSave -.->|参考声纹| RecLoad
 ```

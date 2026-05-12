@@ -1,44 +1,51 @@
-# 系统总体架构图
+# 系统总体架构图 (System Architecture Diagram)
 
 ```mermaid
 graph TB
-    subgraph Input["音频输入"]
-        A[原始音频文件<br/>wav/m4a/mp3]
+    classDef core fill:#e1f5fe,stroke:#0288d1,stroke-width:2px;
+    classDef storage fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px;
+    classDef external fill:#fff3e0,stroke:#f57c00,stroke-width:2px;
+    classDef gateway fill:#e8f5e9,stroke:#388e3c,stroke-width:2px;
+    classDef client fill:#fce4ec,stroke:#c2185b,stroke-width:2px;
+
+    subgraph 用户层
+        CLI([CLI 命令行]):::client
+        Script([Python 脚本]):::client
     end
 
-    subgraph Preprocess["预处理"]
-        B[音频加载<br/>torchaudio/librosa]
-        C[重采样 16kHz]
-        D[单声道转换]
-        E[VAD 静音检测]
+    subgraph 核心层
+        Loader[音频加载 torchaudio/librosa]:::core
+        Preprocess[预处理 重采样/单声道]:::core
+        VAD[Silero VAD 静音检测]:::core
+        Client[WespeakerClient 主类]:::core
+        Model[ResNet34 pyannote.audio]:::core
+        Embed[Embedding 提取 256维]:::core
     end
 
-    subgraph Core["WeSpeaker 核心"]
-        F[WespeakerClient]
-        G[ResNet34 模型<br/>pyannote.audio]
-        H[Embedding 提取<br/>256 维向量]
+    subgraph 增强层
+        Augment[噪声增强 audiomentations]:::external
+        SNR[SNR 估计]:::external
     end
 
-    subgraph Operation["操作模式"]
-        I[注册模式<br/>enroll]
-        J[识别模式<br/>recognize]
-        K[滑动窗口测试<br/>test_sliding_window]
+    subgraph 存储层
+        Pkl[(声纹模板 .pkl)]:::storage
+        ModelFile[(模型文件 models/)]:::storage
+        Asset[(音频素材 asset/)]:::storage
     end
 
-    subgraph Storage["存储"]
-        L[(声纹模板<br/>voice.pkl)]
-        M[(实验日志<br/>experiment_log/)]
-    end
-
-    A --> B --> C --> D --> E --> F
-    F --> G --> H
-    F --> I --> L
-    F --> J --> L
-    F --> K --> M
-
-    style Input fill:#e3f2fd
-    style Preprocess fill:#fff3e0
-    style Core fill:#f3e5f5
-    style Operation fill:#e8f5e9
-    style Storage fill:#fce4ec
+    CLI --> Client
+    Script --> Client
+    Client --> Loader
+    Loader --> Preprocess
+    Preprocess --> VAD
+    VAD --> Client
+    Client --> Model
+    Model --> Embed
+    Client --> Augment
+    Client --> SNR
+    Augment --> Client
+    SNR --> Client
+    Client --> Pkl
+    Model --> ModelFile
+    Loader --> Asset
 ```
