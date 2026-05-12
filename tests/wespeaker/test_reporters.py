@@ -8,7 +8,11 @@ from pathlib import Path
 
 import pytest
 
-from src.wespeaker.reporters import JsonDataExporter, MarkdownReportGenerator
+from src.wespeaker.reporters import (
+    JsonDataExporter,
+    MarkdownReportGenerator,
+    TerminalReporter,
+)
 
 
 def test_json_exporter_creates_file(tmp_path: Path):
@@ -247,3 +251,163 @@ def test_markdown_generator_with_full_data(tmp_path: Path):
     assert "存在 1 例误接受" in content
     assert "存在 1 例误拒绝" in content
     assert "建议阈值范围:" in content
+
+
+def test_terminal_reporter_verbose_mode(capsys):
+    """Test TerminalReporter in verbose mode shows detailed output."""
+    reporter = TerminalReporter(verbose=True, debug=False)
+
+    reporter.print_registration_summary("John", {"num_segments": 5, "total_embeddings": 25})
+
+    captured = capsys.readouterr()
+    assert "25" in captured.out
+    assert "片段数: 5" in captured.out
+
+
+def test_terminal_reporter_non_verbose_mode(capsys):
+    """Test TerminalReporter in non-verbose mode shows minimal output."""
+    reporter = TerminalReporter(verbose=False, debug=False)
+
+    reporter.print_registration_summary("John", {"num_segments": 5, "total_embeddings": 25})
+
+    captured = capsys.readouterr()
+    assert "✅" in captured.out
+    assert "片段数" not in captured.out
+
+
+def test_terminal_reporter_print_header(capsys):
+    """Test TerminalReporter prints header with threshold and SNR levels."""
+    reporter = TerminalReporter(verbose=True, debug=False)
+
+    reporter.print_header(0.55, [20, 15, 10, 5, 0])
+
+    captured = capsys.readouterr()
+    assert "0.55" in captured.out
+    assert "[20, 15, 10, 5, 0]" in captured.out
+    assert "声纹交叉测试" in captured.out
+
+
+def test_terminal_reporter_registration_start_verbose(capsys):
+    """Test registration start message in verbose mode."""
+    reporter = TerminalReporter(verbose=True, debug=False)
+
+    reporter.print_registration_start("John", "/path/to/segments")
+
+    captured = capsys.readouterr()
+    assert "[注册] John:" in captured.out
+    assert "/path/to/segments" in captured.out
+
+
+def test_terminal_reporter_registration_start_non_verbose(capsys):
+    """Test registration start message in non-verbose mode."""
+    reporter = TerminalReporter(verbose=False, debug=False)
+
+    reporter.print_registration_start("John", "/path/to/segments")
+
+    captured = capsys.readouterr()
+    assert "[注册] John..." in captured.out
+    assert "/path/to/segments" not in captured.out
+
+
+def test_terminal_reporter_registration_summary_with_quality(capsys):
+    """Test registration summary with quality metrics."""
+    reporter = TerminalReporter(verbose=True, debug=False)
+
+    reg_data = {
+        "num_segments": 5,
+        "total_embeddings": 25,
+        "quality_metrics": {"l2_norms": {"min": 0.95, "max": 1.05, "mean": 1.0, "std": 0.02}},
+    }
+    reporter.print_registration_summary("John", reg_data)
+
+    captured = capsys.readouterr()
+    assert "L2 范数:" in captured.out
+    assert "mean=1.0000" in captured.out
+
+
+def test_terminal_reporter_recognition_progress_verbose(capsys):
+    """Test recognition progress in verbose mode."""
+    reporter = TerminalReporter(verbose=True, debug=False)
+
+    reporter.print_recognition_progress(
+        test_label="John_clean",
+        ref_speaker="John",
+        score=0.85,
+        is_match=True,
+    )
+
+    captured = capsys.readouterr()
+    assert "John_clean vs John:" in captured.out
+    assert "0.8500" in captured.out
+    assert "✅" in captured.out
+
+
+def test_terminal_reporter_recognition_progress_non_verbose(capsys):
+    """Test recognition progress in non-verbose mode (no output)."""
+    reporter = TerminalReporter(verbose=False, debug=False)
+
+    reporter.print_recognition_progress(
+        test_label="John_clean",
+        ref_speaker="John",
+        score=0.85,
+        is_match=True,
+    )
+
+    captured = capsys.readouterr()
+    assert captured.out == ""
+
+
+def test_terminal_reporter_test_summary_all_pass(capsys):
+    """Test test summary when all tests pass."""
+    reporter = TerminalReporter(verbose=True, debug=False)
+
+    reporter.print_test_summary(total=10, passed=10, errors={})
+
+    captured = capsys.readouterr()
+    assert "所有测试通过" in captured.out
+    assert "✅" in captured.out
+
+
+def test_terminal_reporter_test_summary_with_failures(capsys):
+    """Test test summary with failures."""
+    reporter = TerminalReporter(verbose=True, debug=False)
+
+    errors = {
+        "false_accepts": [{"test_speaker": "Frank", "mistaken_as": "John", "score": 0.58}],
+        "false_rejects": [{"test_speaker": "John", "test_variant": "noisy", "score": 0.52}],
+    }
+    reporter.print_test_summary(total=10, passed=8, errors=errors)
+
+    captured = capsys.readouterr()
+    assert "2/10" in captured.out
+    assert "误接受: 1 例" in captured.out
+    assert "误拒绝: 1 例" in captured.out
+
+
+def test_terminal_reporter_debug_mode(capsys):
+    """Test debug mode prints embedding debug info."""
+    reporter = TerminalReporter(verbose=False, debug=True)
+
+    import torch
+
+    embedding = torch.tensor([1.0, 2.0, 3.0, 4.0])
+    reporter.print_debug_embedding("test_embedding", embedding)
+
+    captured = capsys.readouterr()
+    assert "DEBUG test_embedding:" in captured.out
+    assert "shape=torch.Size([4])" in captured.out
+    assert "mean=" in captured.out
+    assert "std=" in captured.out
+
+
+def test_terminal_reporter_non_debug_mode(capsys):
+    """Test non-debug mode does not print embedding info."""
+    reporter = TerminalReporter(verbose=False, debug=False)
+
+    import torch
+
+    embedding = torch.tensor([1.0, 2.0, 3.0, 4.0])
+    reporter.print_debug_embedding("test_embedding", embedding)
+
+    captured = capsys.readouterr()
+    assert captured.out == ""

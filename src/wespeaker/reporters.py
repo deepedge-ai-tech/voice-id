@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
@@ -326,3 +327,85 @@ class MarkdownReportGenerator:
             lines.append(f"\n建议阈值范围: {min_score:.2f} - {threshold:.2f}")
 
         return "\n".join(lines)
+
+
+@dataclass
+class TerminalReporter:
+    """终端输出报告器."""
+
+    verbose: bool = False
+    debug: bool = False
+
+    def __post_init__(self) -> None:
+        self.logger = logging.getLogger(__name__)
+
+    def print_header(self, threshold: float, snr_levels: list[float]) -> None:
+        """打印测试标题."""
+        print("\n" + "=" * 60)
+        print(f"  声纹交叉测试 (阈值 = {threshold:.2f})")
+        print(f"  SNR 级别: {snr_levels}")
+        print("=" * 60)
+
+    def print_registration_start(self, speaker: str, reg_dir: str) -> None:
+        """打印注册开始."""
+        if self.verbose:
+            print(f"\n[注册] {speaker}: {reg_dir}")
+        else:
+            print(f"[注册] {speaker}... ", end="", flush=True)
+
+    def print_registration_summary(
+        self,
+        speaker: str,
+        reg_data: dict[str, Any],
+    ) -> None:
+        """打印注册摘要."""
+        if not self.verbose:
+            print("✅")
+            return
+
+        print(f"  片段数: {reg_data.get('num_segments', 0)}")
+        print(f"  总 embeddings: {reg_data.get('total_embeddings', 0)}")
+
+        quality = reg_data.get("quality_metrics", {})
+        if quality and "l2_norms" in quality:
+            norms = quality["l2_norms"]
+            print(f"  L2 范数: mean={norms['mean']:.4f}")
+
+    def print_recognition_progress(
+        self,
+        test_label: str,
+        ref_speaker: str,
+        score: float,
+        is_match: bool,
+    ) -> None:
+        """打印识别进度."""
+        if self.verbose:
+            status = "✅" if is_match else "❌"
+            print(f"  {test_label} vs {ref_speaker}: {score:.4f} {status}")
+
+    def print_test_summary(self, total: int, passed: int, errors: dict) -> None:
+        """打印测试总结."""
+        print("\n" + "=" * 60)
+        if passed == total:
+            print("✅ 所有测试通过")
+        else:
+            print(f"⚠️  {total - passed}/{total} 测试未通过")
+
+        fas = errors.get("false_accepts", [])
+        frs = errors.get("false_rejects", [])
+
+        if fas:
+            print(f"\n误接受: {len(fas)} 例")
+        if frs:
+            print(f"误拒绝: {len(frs)} 例")
+
+        print("=" * 60)
+
+    def print_debug_embedding(self, name: str, embedding: "torch.Tensor") -> None:
+        """打印调试信息（向量值）."""
+        if self.debug:
+            import torch
+
+            print(
+                f"DEBUG {name}: shape={embedding.shape}, mean={embedding.mean():.4f}, std={embedding.std():.4f}"
+            )
