@@ -181,7 +181,7 @@ def test_registration_diagnostics_to_dict_structure():
 
 def test_recognition_diagnostics_collect():
     """Test RecognitionDiagnostics data collection."""
-    diag = RecognitionDiagnostics("John", "安静环境测试", 0.75)
+    diag = RecognitionDiagnostics("John", "安静环境测试", confidence=0.75)
     diag.add_comparison("Frank", 0.32, False)
     diag.add_comparison("John", 0.75, True)
 
@@ -194,7 +194,7 @@ def test_recognition_diagnostics_collect():
 
 def test_recognition_diagnostics_error_cases():
     """Test RecognitionDiagnostics error case recording."""
-    diag = RecognitionDiagnostics("John", "安静环境测试", 0.45, threshold=0.55)
+    diag = RecognitionDiagnostics("John", "安静环境测试", threshold=0.55, confidence=0.45)
     diag.record_false_positive("Frank", 0.62)
     diag.record_false_negative(0.10)
 
@@ -204,7 +204,7 @@ def test_recognition_diagnostics_error_cases():
 
 def test_recognition_diagnostics_preprocessing():
     """Test RecognitionDiagnostics preprocessing info."""
-    diag = RecognitionDiagnostics("Alice", "嘈杂环境测试", 0.68)
+    diag = RecognitionDiagnostics("Alice", "嘈杂环境测试", confidence=0.68)
     diag.set_preprocessing_info(
         duration=5.2,
         sample_rate=16000,
@@ -223,7 +223,7 @@ def test_recognition_diagnostics_preprocessing():
 
 def test_recognition_diagnostics_top2_diff():
     """Test RecognitionDiagnostics Top-2 similarity difference calculation."""
-    diag = RecognitionDiagnostics("Bob", "测试", 0.80)
+    diag = RecognitionDiagnostics("Bob", "测试", confidence=0.80)
     diag.add_comparison("Bob", 0.80, True)
     diag.add_comparison("Alice", 0.45, False)
     diag.add_comparison("Charlie", 0.35, False)
@@ -235,7 +235,7 @@ def test_recognition_diagnostics_top2_diff():
 
 def test_recognition_diagnostics_single_comparison():
     """Test RecognitionDiagnostics with single comparison."""
-    diag = RecognitionDiagnostics("Single", "测试", 0.70)
+    diag = RecognitionDiagnostics("Single", "测试", confidence=0.70)
     diag.add_comparison("Single", 0.70, True)
 
     data = diag.to_dict()
@@ -244,9 +244,9 @@ def test_recognition_diagnostics_single_comparison():
 
 def test_recognition_diagnostics_default_values():
     """Test RecognitionDiagnostics default values."""
-    diag = RecognitionDiagnostics("Test", "variant", 0.60)
+    diag = RecognitionDiagnostics("Test", "variant", threshold=0.60, confidence=None)
 
-    assert diag.threshold == 0.55
+    assert diag.threshold == 0.60
     assert diag.duration == 0.0
     assert diag.sample_rate == 16000
     assert diag.rms_energy == 0.0
@@ -257,7 +257,7 @@ def test_recognition_diagnostics_default_values():
 
 def test_recognition_diagnostics_error_analysis_details():
     """Test RecognitionDiagnostics error analysis details."""
-    diag = RecognitionDiagnostics("John", "测试", 0.40, threshold=0.55)
+    diag = RecognitionDiagnostics("John", "测试", threshold=0.55, confidence=0.40)
 
     # Record false positive
     diag.record_false_positive("Frank", 0.62)
@@ -285,11 +285,11 @@ def test_recognition_diagnostics_error_analysis_details():
 def test_recognition_diagnostics_is_correct_flag():
     """Test RecognitionDiagnostics is_correct flag."""
     # Correct case - no errors
-    diag_correct = RecognitionDiagnostics("John", "测试", 0.75)
+    diag_correct = RecognitionDiagnostics("John", "测试", confidence=0.75)
     diag_correct.add_comparison("John", 0.75, True)
     assert diag_correct.to_dict()["is_correct"] is True
 
     # Error case - false positive
-    diag_error = RecognitionDiagnostics("John", "测试", 0.62)
+    diag_error = RecognitionDiagnostics("John", "测试", confidence=0.62)
     diag_error.record_false_positive("Frank", 0.62)
     assert diag_error.to_dict()["is_correct"] is False

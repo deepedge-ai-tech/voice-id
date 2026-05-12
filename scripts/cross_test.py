@@ -396,6 +396,8 @@ def cross_test(
 
                 if test_speaker == ref_name:
                     diagonal_scores[test_speaker].append(score)
+                    # 设置 confidence 为正确说话人的得分
+                    recog_diag.confidence = float(score)
                     # 这是正确的匹配
                     if not is_match:
                         # 误拒绝

@@ -157,8 +157,8 @@ class RecognitionDiagnostics:
 
     test_speaker: str
     test_variant: str
-    confidence: float
     threshold: float = 0.55
+    confidence: float | None = None
     duration: float = 0.0
     sample_rate: int = 16000
     rms_energy: float = 0.0
@@ -233,7 +233,7 @@ class RecognitionDiagnostics:
         return {
             "test_speaker": self.test_speaker,
             "test_variant": self.test_variant,
-            "confidence": self.confidence,
+            "confidence": self.confidence if self.confidence is not None else 0.0,
             "threshold": self.threshold,
             "is_correct": self.error_analysis == {},
             "preprocessing": self.preprocessing,
