@@ -93,6 +93,8 @@ class BestConfig:
     enable_vad: bool = False
     vad_rms_threshold: float = 0.002  # VAD 能量阈值（已降低以减少误剪）
     noise_injection_snrs: tuple[float, ...] = (20, 15, 10, 5, 0)
+    sliding_window_secs: float = 0.6
+    sliding_hop_secs: float = 0.2
 
 
 # --------------------------------------------------------------------------- #
