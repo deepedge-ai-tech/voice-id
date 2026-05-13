@@ -80,10 +80,6 @@ SPEAKERS = {
         "register_dir": "asset/john_metting_room/registration_segments",
         "test_segments_dir": "asset/john_metting_room/test_segments",
     },
-    "John_D_USB": {
-        "register_dir": "asset/john_d_usb/registration_segments",
-        "test_segments_dir": "asset/john_d_usb/test_segments",
-    },
     "John_D_USB_AEC": {
         "register_dir": "asset/john_d_usb_AEC/registration_segments",
         "test_segments_dir": "asset/john_d_usb_AEC/test_segments",
@@ -112,11 +108,10 @@ SPEAKERS = {
 
 # 同一人组映射（用于评估）
 SAME_PERSON_GROUPS: dict[str, set[str]] = {
-    "John": {"John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC"},
-    "John_USB": {"John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC"},
-    "John_MeetingRoom": {"John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC"},
-    "John_D_USB": {"John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC"},
-    "John_D_USB_AEC": {"John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC"},
+    "John": {"John", "John_USB", "John_MeetingRoom", "John_D_USB_AEC"},
+    "John_USB": {"John", "John_USB", "John_MeetingRoom", "John_D_USB_AEC"},
+    "John_MeetingRoom": {"John", "John_USB", "John_MeetingRoom", "John_D_USB_AEC"},
+    "John_D_USB_AEC": {"John", "John_USB", "John_MeetingRoom", "John_D_USB_AEC"},
     "Zhong": {"Zhong", "Zhong_D_USB"},
     "Zhong_D_USB": {"Zhong", "Zhong_D_USB"},
 }
@@ -125,7 +120,6 @@ SPEAKER_ORDER = [
     "John",
     "John_USB",
     "John_MeetingRoom",
-    "John_D_USB",
     "John_D_USB_AEC",
     "Zhong",
     "Zhong_D_USB",
