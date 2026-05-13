@@ -84,7 +84,7 @@ plt.rcParams["axes.unicode_minus"] = False
 # ---------------------------------------------------------------------------- #
 
 # ---- 识别参数 ----
-SIM_THRESHOLD = 0.55  # 相似度阈值 [0.20 - 0.75]，降低可减少误拒绝但增加误接受
+SIM_THRESHOLD = 0.35  # 相似度阈值 [0.20 - 0.75]
 VERIFY_CROP_MODE = "full_utterance"  # 裁剪模式: full_utterance, tail_window, head_window
 VERIFY_BUFFER_KEEP_SECS = 60.0  # buffer 最大保留时长 [2.0 - 60.0]，60.0 表示不截断
 VERIFY_WINDOW_SECS = 1.0  # 滑动窗口长度 [0.3 - 3.0]
@@ -93,12 +93,12 @@ VERIFY_WINDOW_SECS = 1.0  # 滑动窗口长度 [0.3 - 3.0]
 ENROLLMENT_SEGMENT_SECS = 1.0  # 注册分段长度 [0.5 - 3.0]
 
 # ---- VAD 参数 ----
-ENABLE_VAD = False  # 启用 VAD 去静音 (True/False)，实验表明 False 得分更高
+ENABLE_VAD = False  # 启用 VAD 去静音 (True/False)
 VAD_RMS_THRESHOLD = 0.002  # VAD 能量阈值 [0.001 - 0.02]
 
 # ---- 噪声注入 ----
-NOISE_INJECTION_SNRS = [20.0, 15.0, 10.0, 5.0, 0.0]  # SNR 级别列表
-NOISE_PATH = "asset/john/嘈杂环境测试.m4a"  # 噪声音频路径
+NOISE_INJECTION_SNRS = [30.0, 25.0, 20.0, 15.0, 10.0, 5.0, 0.0]  # SNR 级别列表
+NOISE_PATH = "extract-noisy"  # 从 test 集合中提取噪声（替代真实录音文件）
 
 # ---- 滑动窗口参数 ----
 SLIDING_WINDOW_SECS = 0.6  # 滑动窗口长度 [0.3 - 3.0]
@@ -337,10 +337,58 @@ def cross_test(
     recognizer._client._ensure_model()
     metrics.end("model_load")
 
-    # 2. 提取噪声 profile
-    if config.verbose:
-        logger.info(f"提取噪声 profile: {config.noise_path}")
-    noise_profile = WespeakerBest.extract_noise_profile(config.noise_path)
+    # 2. 提取或生成噪声 profile
+    noise_path_lower = str(config.noise_path).lower()
+    if noise_path_lower.startswith("synthetic"):
+        if config.verbose:
+            logger.info("使用合成噪声")
+        noise_type = str(config.noise_path).split(":")[1] if ":" in str(config.noise_path) else "white"
+        duration_secs = 5.0
+        sample_rate = 16000
+        n_samples = int(duration_secs * sample_rate)
+        if noise_type == "pink":
+            white = np.random.randn(n_samples)
+            fft = np.fft.rfft(white)
+            freq = np.fft.rfftfreq(n_samples, d=1/sample_rate)
+            fft[freq > 0] /= np.sqrt(freq[freq > 0])
+            noise_profile = np.fft.irfft(fft, n=n_samples).astype(np.float32)
+            noise_profile /= np.std(noise_profile) + 1e-12
+        else:
+            noise_profile = np.random.randn(n_samples).astype(np.float32)
+        if config.verbose:
+            logger.info(f"  生成 {noise_type} 噪声: {duration_secs:.1f}s")
+    elif noise_path_lower.startswith("extract-noisy"):
+        # 从 test 集合中提取环境噪声 — 遍历所有 test_segments_dir
+        if config.verbose:
+            logger.info("从 test 集合中提取环境噪声")
+        from src.wespeaker.wespeaker import _vad_segments, _load_audio
+        all_noise_parts = []
+        sample_rate = 16000
+        for name, paths in SPEAKERS.items():
+            test_dir = Path(paths["test_segments_dir"])
+            test_files = sorted(test_dir.glob("*.wav"))
+            for audio_file in test_files:
+                waveform = _load_audio(str(audio_file), sample_rate)
+                noise_segs = _vad_segments(waveform, rms_threshold=0.005, sample_rate=sample_rate)
+                if not noise_segs:
+                    # 无静音段，取末尾 10% 作为噪声近似
+                    tail_len = waveform.numel() // 10
+                    if tail_len > sample_rate // 2:
+                        all_noise_parts.append(waveform[-tail_len:])
+                else:
+                    for seg in noise_segs:
+                        all_noise_parts.append(seg)
+        if all_noise_parts:
+            noise_profile = torch.cat(all_noise_parts).numpy()
+            if config.verbose:
+                logger.info(f"  从 {len(all_noise_parts)} 个噪声段提取, 总长 {len(noise_profile)/sample_rate:.1f}s")
+        else:
+            logger.warning("未能从 test 集合提取噪声，使用白噪声替代")
+            noise_profile = np.random.randn(int(3.0 * sample_rate)).astype(np.float32)
+    else:
+        if config.verbose:
+            logger.info(f"提取噪声 profile: {config.noise_path}")
+        noise_profile = WespeakerBest.extract_noise_profile(config.noise_path)
     if config.verbose:
         logger.info(f"  噪声长度: {len(noise_profile) / 16000:.1f}s")
 
@@ -386,7 +434,9 @@ def cross_test(
         shutil.copy(merged_audio_path, merged_single_path)
 
         # 执行注册（只注册这一条合并后的音频）
-        result = recognizer.enroll(str(merged_dir), noise_profile, str(tmp_pk), config.noise_injection_snrs)
+        # 如果 SNR 列表为空，使用极低噪声（40dB ≈ 无噪声）的纯静音注册
+        enroll_snrs = config.noise_injection_snrs if config.noise_injection_snrs else [40.0]
+        result = recognizer.enroll(str(merged_dir), noise_profile, str(tmp_pk), enroll_snrs)
         voiceprints[name] = result["embedding"]
 
         # 添加合并音频信息到诊断
@@ -669,7 +719,7 @@ def create_config_from_args() -> ExperimentConfig:
     parser.add_argument("--buffer-secs", type=float, default=VERIFY_BUFFER_KEEP_SECS, help="buffer 保留时长")
     parser.add_argument("--window-secs", type=float, default=VERIFY_WINDOW_SECS, help="窗口长度")
     parser.add_argument("--segment-secs", type=float, default=ENROLLMENT_SEGMENT_SECS, help="注册分段长度")
-    parser.add_argument("--enable-vad", action="store_true", help="启用 VAD（默认关闭）")
+    parser.add_argument("--disable-vad", action="store_true", help="禁用 VAD")
     parser.add_argument("--vad-threshold", type=float, default=VAD_RMS_THRESHOLD, help="VAD 能量阈值")
     parser.add_argument("--verbose", "-v", action="store_true", help="详细输出")
     parser.add_argument("--debug", "-d", action="store_true", help="调试模式")
@@ -684,7 +734,7 @@ def create_config_from_args() -> ExperimentConfig:
             return best_config
 
     # 否则使用命令行参数（或顶部默认值）
-    snr_levels = [float(x.strip()) for x in args.snrs.split(",")]
+    snr_levels = [float(x.strip()) for x in args.snrs.split(",") if x.strip()] if args.snrs.strip() else []
 
     return ExperimentConfig(
         sim_threshold=args.threshold,
@@ -692,7 +742,7 @@ def create_config_from_args() -> ExperimentConfig:
         verify_buffer_keep_secs=args.buffer_secs,
         verify_window_secs=args.window_secs,
         enrollment_segment_secs=args.segment_secs,
-        enable_vad=args.enable_vad,  # 默认 False，需要 --enable-vad 才开启
+        enable_vad=ENABLE_VAD and not args.disable_vad,  # 使用模块级变量 ENABLE_VAD 作为默认值
         vad_rms_threshold=args.vad_threshold,
         enable_score_compensation=ENABLE_SCORE_COMPENSATION,  # 使用固定值
         score_compensation_target_duration=SCORE_COMPENSATION_TARGET_DURATION,  # 使用固定值
