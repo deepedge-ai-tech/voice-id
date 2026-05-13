@@ -3,7 +3,21 @@ name = "wespeaker"
 version = "0.1.0"
 description = "WeSpeaker 声纹识别工具 — 独立的声纹注册与识别 CLI 工具"
 readme = "README.md"
+license = "MIT"
 requires-python = ">=3.12"
+authors = [
+    { name = "WeSpeaker Contributors" }
+]
+keywords = ["speaker", "verification", "voice", "recognition", "speaker-identification"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Multimedia :: Sound/Audio :: Speech",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Operating System :: OS Independent",
+]
 dependencies = [
     "audiomentations>=0.43.1",
     "noisereduce>=3.0.3",
@@ -17,6 +31,25 @@ dependencies = [
     "torch>=2.11.0",
     "torchaudio>=2.11.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/wespeaker"
+Documentation = "https://github.com/yourusername/wespeaker#readme"
+Repository = "https://github.com/yourusername/wespeaker"
+"Bug Tracker" = "https://github.com/yourusername/wespeaker/issues"
+
+[project.scripts]
+wespeaker = "src.wespeaker.wespeaker:main"
+
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["src.wespeaker"]
+
+[tool.setuptools.package-data]
+"src.wespeaker" = ["*.yaml", "*.yml", "*.json", "*.txt"]
 
 [dependency-groups]
 dev = [
@@ -36,8 +69,8 @@ addopts = "-v --cov=src/wespeaker --cov-report=term-missing --cov-fail-under=30"
 
 [tool.black]
 line-length = 100
-target-version = ["py312"]
+target-version = ["py12"]
 
 [tool.isort]
 profile = "black"
-line_length = 100
+line-length = 100

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""声纹交叉测试 — 2x2 识别矩阵 (John & Xixi)。
+"""声纹交叉测试 — 3x3 识别矩阵 (John, Xixi & Frank)。
 
 测试场景:
-  注册: John, Xixi (使用 registration_segments 目录)
+  注册: John, Xixi, Frank (使用 registration_segments 目录)
   测试: 每人的 test_segments 目录中所有片段，每个片段单独测试
   裁剪: 超过 2 秒的音频只保留前 2 秒
 
@@ -64,6 +64,10 @@ SPEAKERS = {
     "Xixi": {
         "register_dir": "asset/xixi/registration_segments",
         "test_segments_dir": "asset/xixi/test_segments",
+    },
+    "Frank": {
+        "register_dir": "asset/frank/registration_segments",
+        "test_segments_dir": "asset/frank/test_segments",
     },
 }
 
@@ -258,13 +262,19 @@ def cross_test(
         result = recognizer.enroll(reg_dir, noise_profile, str(tmp_pk), snr_levels)
         voiceprints[name] = result["embedding"]
 
-        # 添加片段信息到诊断
-        for seg_file in segment_files:
+        # 添加片段信息到诊断（使用实际的片段 embeddings）
+        fragment_embeddings = result.get("fragment_embeddings", [])
+        for i, seg_file in enumerate(segment_files):
             import torchaudio
 
             waveform, sr = torchaudio.load(seg_file)
             duration = waveform.shape[1] / sr
-            reg_diag.add_segment(seg_file.name, duration, sr, result["embedding"])
+            # 使用对应的片段 embedding（如果可用）
+            if i < len(fragment_embeddings):
+                reg_diag.add_segment(seg_file.name, duration, sr, fragment_embeddings[i])
+            else:
+                # 回退到使用均值 embedding（向后兼容）
+                reg_diag.add_segment(seg_file.name, duration, sr, result["embedding"])
 
         # 记录噪声注入效果（模拟）
         for snr in snr_levels:
@@ -483,7 +493,7 @@ def cross_test(
 def main() -> None:
     import argparse
 
-    parser = argparse.ArgumentParser(description="声纹交叉测试 — 2x2 识别矩阵 (John & Xixi)")
+    parser = argparse.ArgumentParser(description="声纹交叉测试 — 3x3 识别矩阵 (John, Xixi & Frank)")
     parser.add_argument(
         "--noise",
         default="asset/john/嘈杂环境测试.m4a",

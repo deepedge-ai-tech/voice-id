@@ -44,7 +44,7 @@ from .wespeaker import (
     _apply_silero_vad,
     _extract_embedding,
     _load_audio,
-    _vad_segments,
+    _vad_segments,  # 用于噪声提取，不用于注册/识别预处理
 )
 
 # --------------------------------------------------------------------------- #
@@ -81,7 +81,7 @@ class BestConfig:
     verify_window_secs: float = 1.0
     enrollment_segment_secs: float = 1.0
     enable_vad: bool = False
-    vad_rms_threshold: float = 0.005
+    vad_rms_threshold: float = 0.002  # VAD 能量阈值（已降低以减少误剪）
     noise_injection_snrs: tuple[float, ...] = (20, 15, 10, 5, 0)
 
 
@@ -278,6 +278,7 @@ class WespeakerBest:
             "embedding_dim": ref.numel(),
             "pk_path": str(pk_path.resolve()),
             "embedding": ref,
+            "fragment_embeddings": all_embeddings,  # 添加片段 embeddings 用于诊断
         }
 
     # ------------------------------------------------------------------ #

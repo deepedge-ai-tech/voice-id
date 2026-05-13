@@ -566,7 +566,9 @@ def _crop_verify(
 #  CLI 入口
 # --------------------------------------------------------------------------- #
 
-if __name__ == "__main__":
+
+def main() -> None:
+    """CLI 入口点 - 用于 pip 安装后的 console script."""
     import argparse
 
     parser = argparse.ArgumentParser(description="WeSpeaker 声纹注册与识别")
@@ -606,3 +608,7 @@ if __name__ == "__main__":
         logger.info("识别结果: %s", r)
     else:
         parser.print_help()
+
+
+if __name__ == "__main__":
+    main()
