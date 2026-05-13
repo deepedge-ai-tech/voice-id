@@ -69,8 +69,7 @@ addopts = "-v --cov=src/wespeaker --cov-report=term-missing --cov-fail-under=30"
 
 [tool.black]
 line-length = 100
-target-version = ["py12"]
+target-version = ["py312"]
 
 [tool.isort]
 profile = "black"
-line-length = 100

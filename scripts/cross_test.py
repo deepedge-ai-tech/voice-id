@@ -1,13 +1,17 @@
 #!/usr/bin/env python3
-"""声纹交叉测试 — 3x3 识别矩阵 (John, Xixi & Frank)。
+"""声纹交叉测试 — 7x7 识别矩阵 (John, John_USB, John_MeetingRoom, Xixi, Frank, Qingqing & Zhong)。
 
 测试场景:
-  注册: John, Xixi, Frank (使用 registration_segments 目录)
+  注册: John, John_USB, John_MeetingRoom, Xixi, Frank, Qingqing, Zhong (使用 registration_segments 目录)
   测试: 每人的 test_segments 目录中所有片段，每个片段单独测试
   裁剪: 超过 2 秒的音频只保留前 2 秒
 
+说话人组:
+  - John 组: John, John_USB, John_MeetingRoom（同一人，不同录制条件）
+  - 其他: Xixi, Frank, Qingqing, Zhong（独立说话人）
+
 预期:
-  - 正确匹配: 同一人的测试片段 vs 自己的声纹 → 通过
+  - 正确匹配: John 组内相互匹配，其他人只匹配自己 → 通过
   - 正确拒绝: 不同人的测试片段 vs 其他人声纹 → 拒绝
 
 用法:
@@ -15,6 +19,8 @@
     uv run python scripts/cross_test.py --noise asset/john/嘈杂环境测试.m4a
     uv run python scripts/cross_test.py --snrs 20,15,10,5,0
     uv run python scripts/cross_test.py --threshold 0.50
+    uv run python scripts/cross_test.py --dynamic-threshold  # 启用动态阈值
+    uv run python scripts/cross_test.py --dynamic-threshold --threshold-mode smooth
     uv run python scripts/cross_test.py --output-dir outputs  # 生成图表和报告
     uv run python scripts/cross_test.py --verbose  # 详细输出
     uv run python scripts/cross_test.py --debug  # 调试信息
@@ -61,6 +67,14 @@ SPEAKERS = {
         "register_dir": "asset/john/registration_segments",
         "test_segments_dir": "asset/john/test_segments",
     },
+    "John_USB": {
+        "register_dir": "asset/john_usb/registration_segments",
+        "test_segments_dir": "asset/john_usb/test_segments",
+    },
+    "John_MeetingRoom": {
+        "register_dir": "asset/john_metting_room/registration_segments",
+        "test_segments_dir": "asset/john_metting_room/test_segments",
+    },
     "Xixi": {
         "register_dir": "asset/xixi/registration_segments",
         "test_segments_dir": "asset/xixi/test_segments",
@@ -69,7 +83,31 @@ SPEAKERS = {
         "register_dir": "asset/frank/registration_segments",
         "test_segments_dir": "asset/frank/test_segments",
     },
+    "Qingqing": {
+        "register_dir": "asset/qingqing/registration_segments",
+        "test_segments_dir": "asset/qingqing/test_segments",
+    },
+    "Zhong": {
+        "register_dir": "asset/zhong/registration_segments",
+        "test_segments_dir": "asset/zhong/test_segments",
+    },
 }
+
+# 同一人组映射：三个 John 变体属于同一人
+SAME_PERSON_GROUPS: dict[str, set[str]] = {
+    "John": {"John", "John_USB", "John_MeetingRoom"},
+    "John_USB": {"John", "John_USB", "John_MeetingRoom"},
+    "John_MeetingRoom": {"John", "John_USB", "John_MeetingRoom"},
+}
+
+
+def is_same_person(speaker1: str, speaker2: str) -> bool:
+    """判断两个说话人是否属于同一人（考虑同一人的不同录制条件）."""
+    if speaker1 == speaker2:
+        return True
+    # 检查是否在同一人组中
+    group1 = SAME_PERSON_GROUPS.get(speaker1, {speaker1})
+    return speaker2 in group1
 
 
 # --------------------------------------------------------------------------- #
@@ -197,16 +235,20 @@ def cross_test(
     output_dir: Path | None = None,
     verbose: bool = False,
     debug: bool = False,
+    enable_dynamic_threshold: bool = False,
+    threshold_mode: str = "segmented",
 ) -> None:
-    """执行 6x6 交叉测试矩阵，集成诊断数据和报告生成.
+    """执行 7x7 交叉测试矩阵，集成诊断数据和报告生成.
 
     Args:
         noise_path: 噪声音频文件路径
         snr_levels: SNR 级别列表
-        threshold: 识别阈值
+        threshold: 识别阈值（固定阈值模式下的默认值）
         output_dir: 输出目录（可选）
         verbose: 详细输出模式
         debug: 调试模式
+        enable_dynamic_threshold: 启用基于 VAD 时长的动态阈值
+        threshold_mode: 动态阈值模式 ("segmented" 或 "smooth")
     """
     # 配置日志级别
     if debug:
@@ -221,11 +263,17 @@ def cross_test(
     reporter = TerminalReporter(verbose=verbose, debug=debug)
     metrics = PerformanceMetrics()
 
-    reporter.print_header(threshold, snr_levels)
+    threshold_type = "动态" if enable_dynamic_threshold else "固定"
+    reporter.print_header(threshold, snr_levels, threshold_type)
 
     recognizer = WespeakerBest()
     recognizer.config = recognizer.config.__class__(
-        **{**vars(recognizer.config), "sim_threshold": threshold}
+        **{
+            **vars(recognizer.config),
+            "sim_threshold": threshold,
+            "enable_dynamic_threshold": enable_dynamic_threshold,
+            "dynamic_threshold_mode": threshold_mode,
+        }
     )
 
     # 1. 加载模型
@@ -380,7 +428,11 @@ def cross_test(
 
                 row_scores.append(score)
 
-                if test_speaker == ref_name:
+                # 判断是否为同一人（考虑同一人的不同录制条件）
+                same_person = is_same_person(test_speaker, ref_name)
+
+                if same_person:
+                    # 对角线方向（同一人或同一人的不同变体）
                     diagonal_scores[test_speaker].append(score)
                     # 设置 confidence 为正确说话人的得分
                     recog_diag.confidence = float(score)
@@ -392,6 +444,7 @@ def cross_test(
                             {
                                 "test_speaker": test_speaker,
                                 "test_variant": label,
+                                "ref_speaker": ref_name,
                                 "score": float(score),
                                 "threshold_distance": threshold - float(score),
                             }
@@ -415,7 +468,7 @@ def cross_test(
 
                 if verbose:
                     mark = "✅" if is_match else "❌"
-                    ok = is_match if test_speaker == ref_name else not is_match
+                    ok = is_match if same_person else not is_match
                     status = "✅" if ok else "⚠️ "
                     row += f" {score:.4f} {mark} {status} |"
                 else:
@@ -493,7 +546,7 @@ def cross_test(
 def main() -> None:
     import argparse
 
-    parser = argparse.ArgumentParser(description="声纹交叉测试 — 3x3 识别矩阵 (John, Xixi & Frank)")
+    parser = argparse.ArgumentParser(description="声纹交叉测试 — 7x7 识别矩阵 (John, John_USB, John_MeetingRoom, Xixi, Frank, Qingqing & Zhong)")
     parser.add_argument(
         "--noise",
         default="asset/john/嘈杂环境测试.m4a",
@@ -529,6 +582,17 @@ def main() -> None:
         action="store_true",
         help="调试模式（打印 embedding 调试信息）",
     )
+    parser.add_argument(
+        "--dynamic-threshold",
+        action="store_true",
+        help="启用基于 VAD 时长的动态阈值",
+    )
+    parser.add_argument(
+        "--threshold-mode",
+        choices=["segmented", "smooth"],
+        default="segmented",
+        help="动态阈值模式 (default: segmented)",
+    )
     args = parser.parse_args()
 
     snr_levels = [float(x.strip()) for x in args.snrs.split(",")]
@@ -552,7 +616,16 @@ def main() -> None:
         sys.exit(1)
 
     output_path = Path(args.output_dir) if args.output_dir else None
-    cross_test(args.noise, snr_levels, args.threshold, output_path, args.verbose, args.debug)
+    cross_test(
+        args.noise,
+        snr_levels,
+        args.threshold,
+        output_path,
+        args.verbose,
+        args.debug,
+        args.dynamic_threshold,
+        args.threshold_mode,
+    )
 
 
 if __name__ == "__main__":

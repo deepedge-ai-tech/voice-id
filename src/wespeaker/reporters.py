@@ -396,10 +396,10 @@ class TerminalReporter:
     def __post_init__(self) -> None:
         self.logger = logging.getLogger(__name__)
 
-    def print_header(self, threshold: float, snr_levels: list[float]) -> None:
+    def print_header(self, threshold: float, snr_levels: list[float], threshold_type: str = "固定") -> None:
         """打印测试标题."""
         print("\n" + "=" * 60)
-        print(f"  声纹交叉测试 (阈值 = {threshold:.2f})")
+        print(f"  声纹交叉测试 ({threshold_type}阈值 = {threshold:.2f})")
         print(f"  SNR 级别: {snr_levels}")
         print("=" * 60)
 

@@ -12,6 +12,7 @@ WespeakerClient — 独立的 WeSpeaker 声纹注册与识别工具。
 from __future__ import annotations
 
 import logging
+import math
 import pickle
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -57,7 +58,9 @@ def _load_audio(path: str, target_sr: int = 16000) -> torch.Tensor:
         raise RuntimeError(f"无法加载音频 {path}: {exc}") from exc
 
 
-def _crop_to_duration(waveform: torch.Tensor, max_duration_secs: float, sample_rate: int) -> torch.Tensor:
+def _crop_to_duration(
+    waveform: torch.Tensor, max_duration_secs: float, sample_rate: int
+) -> torch.Tensor:
     """裁剪音频到指定时长（保留头部）。
 
     Args:
@@ -83,7 +86,8 @@ def _crop_to_duration(waveform: torch.Tensor, max_duration_secs: float, sample_r
 def _load_silero_vad():
     """加载 Silero VAD 模型，缓存单例."""
     try:
-        from silero_vad import load_silero_vad, get_speech_timestamps
+        from silero_vad import get_speech_timestamps, load_silero_vad
+
         return {
             "model": load_silero_vad(),
             "get_speech_timestamps": get_speech_timestamps,
@@ -338,6 +342,57 @@ def _vad_segments(
 
 
 # --------------------------------------------------------------------------- #
+#  动态阈值
+# --------------------------------------------------------------------------- #
+
+
+def get_dynamic_threshold(vad_duration: float) -> float:
+    """根据 VAD 后音频时长返回推荐阈值.
+
+    基于 5x5 交叉测试实验数据（80 个测试用例）优化：
+    - 测试说话人: John, Xixi, Frank, Qingqing, Zhong
+    - 测试时间: 2026-05-13
+    - 数据来源: experiment_log/cross_test_data_20260513_181002.json
+
+    Args:
+        vad_duration: VAD 处理后的音频时长（秒）
+
+    Returns:
+        推荐的相似度阈值
+
+    时长分组与阈值:
+        < 0.5s:  0.22  (极短音频，大幅降低阈值避免误拒)
+        0.5-1.0s: 0.35  (短音频，适度降低阈值)
+        1.0-1.5s: 0.50  (中等长度，标准阈值)
+        >= 1.5s: 0.55  (长音频，保持高安全性)
+    """
+    if vad_duration < 0.5:
+        return 0.22
+    elif vad_duration < 1.0:
+        return 0.35
+    elif vad_duration < 1.5:
+        return 0.50
+    else:
+        return 0.55
+
+
+def get_dynamic_threshold_smooth(vad_duration: float) -> float:
+    """平滑动态阈值公式（基于对数）.
+
+    基准阈值 0.36，根据时长对数调整，范围限制在 [0.22, 0.55]。
+
+    Args:
+        vad_duration: VAD 处理后的音频时长（秒）
+
+    Returns:
+        推荐的相似度阈值
+    """
+    base = 0.36
+    duration_factor = 0.12 * math.log(max(vad_duration, 0.3))
+    return max(0.22, min(0.55, base + duration_factor))
+
+
+# --------------------------------------------------------------------------- #
 #  主类
 # --------------------------------------------------------------------------- #
 
@@ -363,6 +418,8 @@ class WespeakerClient:
 
     # ---- 识别 ----
     sim_threshold: float = 0.55
+    enable_dynamic_threshold: bool = False  # 启用基于 VAD 时长的动态阈值
+    dynamic_threshold_mode: str = "segmented"  # segmented / smooth
     verify_crop_mode: str = "full_utterance"  # full_utterance / tail_window / head_window
     verify_window_secs: float = 1.0
     verify_buffer_keep_secs: float = 8.0  # 验证 buffer 最大保留时长
@@ -456,6 +513,7 @@ class WespeakerClient:
 
         # 加载音频 + 限制长度 + 裁剪
         waveform = _load_audio(audio_path, self.sample_rate)
+        original_duration = waveform.numel() / self.sample_rate
         max_samples = int(self.verify_buffer_keep_secs * self.sample_rate)
         if waveform.numel() > max_samples:
             if self.verify_crop_mode == "head_window":
@@ -464,12 +522,14 @@ class WespeakerClient:
                 waveform = waveform[-max_samples:]
 
         # VAD 去静音/去纯噪声
+        vad_duration = original_duration
         if self.enable_vad and self.verify_crop_mode == "full_utterance":
             speech_segs = _vad_segments(
                 waveform, rms_threshold=self.vad_rms_threshold, sample_rate=self.sample_rate
             )
             if speech_segs and len(speech_segs) > 0:
                 pcm = torch.cat(speech_segs)
+                vad_duration = pcm.numel() / self.sample_rate
             else:
                 pcm = waveform
         else:
@@ -479,16 +539,28 @@ class WespeakerClient:
         if pcm.numel() == 0:
             return {"is_recognized": False, "confidence": 0.0, "error": "音频太短"}
 
+        # 计算动态阈值
+        threshold = self.sim_threshold
+        if self.enable_dynamic_threshold:
+            if self.dynamic_threshold_mode == "smooth":
+                threshold = get_dynamic_threshold_smooth(vad_duration)
+            else:
+                threshold = get_dynamic_threshold(vad_duration)
+            logger.debug(
+                "Using dynamic threshold: %.4f (VAD duration: %.2fs)", threshold, vad_duration
+            )
+
         # 提取 embedding + 比对
         emb = _extract_embedding(self._model, pcm)
         emb = F.normalize(emb, dim=0)
         score = float(torch.dot(emb, ref).clamp(-1.0, 1.0).item())
 
-        logger.debug("Recognition score: %.4f (threshold=%.2f)", score, self.sim_threshold)
+        logger.debug("Recognition score: %.4f (threshold=%.2f)", score, threshold)
         return {
-            "is_recognized": score >= self.sim_threshold,
+            "is_recognized": score >= threshold,
             "confidence": round(score, 4),
-            "threshold": self.sim_threshold,
+            "threshold": threshold,
+            "vad_duration": round(vad_duration, 2),
         }
 
     # ------------------------------------------------------------------ #
@@ -587,6 +659,15 @@ def main() -> None:
     p_rec.add_argument("--model-path", default="./models/wespeaker")
     p_rec.add_argument("--device", default="cpu")
     p_rec.add_argument("--threshold", type=float, default=0.75)
+    p_rec.add_argument(
+        "--dynamic-threshold", action="store_true", help="启用基于 VAD 时长的动态阈值"
+    )
+    p_rec.add_argument(
+        "--threshold-mode",
+        choices=["segmented", "smooth"],
+        default="segmented",
+        help="动态阈值模式: segmented (分段) 或 smooth (平滑公式)",
+    )
 
     args = parser.parse_args()
 
@@ -603,6 +684,8 @@ def main() -> None:
             model_path=args.model_path,
             device=args.device,
             sim_threshold=args.threshold,
+            enable_dynamic_threshold=args.dynamic_threshold,
+            dynamic_threshold_mode=args.threshold_mode,
         )
         r = client.recognize(args.audio, args.voiceprint)
         logger.info("识别结果: %s", r)
