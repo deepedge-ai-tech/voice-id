@@ -16,6 +16,10 @@
   - 正确拒绝: 不同人的测试片段 vs 其他人声纹 → 拒绝
   - AEC 效果: John_D_USB_AEC 应能与其他 John 变体匹配（测试 AEC 处理对声纹的影响）
 
+图表排序:
+  - 横轴（注册声纹）按说话人组排序：John 组 → Zhong 组 → 其他
+  - 纵轴（测试音频）按说话人分组，每组内按 VAD 时长降序排序
+
 用法:
     uv run python scripts/cross_test.py
     uv run python scripts/cross_test.py --noise asset/john/嘈杂环境测试.m4a
@@ -360,7 +364,23 @@ def cross_test(
             reporter.print_debug_embedding(f"{name} embedding", result["embedding"])
 
     # 4. 交叉识别矩阵（集成诊断）
-    col_headers = [f"{name} 声纹" for name in SPEAKERS.keys()]
+    # 定义说话人组排序顺序：John 组 → Zhong 组 → 其他独立说话人
+    SPEAKER_ORDER = [
+        "John",
+        "John_USB",
+        "John_MeetingRoom",
+        "John_D_USB",
+        "John_D_USB_AEC",
+        "Zhong",
+        "Zhong_D_USB",
+        "Xixi",
+        "Frank",
+        "Qingqing",
+    ]
+
+    # 使用排序后的说话人顺序
+    ordered_speakers = [name for name in SPEAKER_ORDER if name in SPEAKERS]
+    col_headers = [f"{name} 声纹" for name in ordered_speakers]
     col_width = 12
     header = f"{'':>14} | " + " | ".join(f"{h:>{col_width}}" for h in col_headers)
     sep = "-" * len(header)
@@ -379,6 +399,9 @@ def cross_test(
     # 收集用于可视化的数据
     col_names = list(SPEAKERS.keys())
     diagonal_scores: dict[str, list[float]] = {name: [] for name in SPEAKERS.keys()}
+
+    # 创建排序后的列名到索引的映射
+    col_order_map = {name: i for i, name in enumerate(SPEAKER_ORDER) if name in SPEAKERS}
 
     # 先收集所有测试数据，稍后按 VAD 时长排序
     test_data_list: list[dict] = []
@@ -435,7 +458,9 @@ def cross_test(
             if verbose:
                 row = f"{row_label:>30} |"
 
-            for ref_name, ref_emb in voiceprints.items():
+            # 按排序后的顺序遍历参考声纹
+            for ref_name in ordered_speakers:
+                ref_emb = voiceprints[ref_name]
                 with open(tmp_pk, "wb") as f:
                     pickle.dump(ref_emb.cpu().numpy(), f)
 
@@ -529,7 +554,10 @@ def cross_test(
         # row_label 显示 VAD 处理后的时长
         row_label = f"{test_speaker}/{label} ({vad_duration:.2f}s)"
         row_labels.append(row_label)
-        scores_matrix.append(data["row_scores"])
+        # 按 SPEAKER_ORDER 重新排列分数
+        row_scores = data["row_scores"]
+        reordered_scores = [row_scores[i] for i in sorted(col_order_map.values())]
+        scores_matrix.append(reordered_scores)
 
     # 6. 总结
     total_tests = len(scores_matrix)
@@ -544,7 +572,9 @@ def cross_test(
         timestamp = datetime.now()
 
         scores_array = np.array(scores_matrix)
-        col_labels = [f"{name} 声纹" for name in col_names]
+        # 使用排序后的列名
+        ordered_col_names = [name for name in SPEAKER_ORDER if name in SPEAKERS]
+        col_labels = [f"{name} 声纹" for name in ordered_col_names]
 
         # 生成热力图
         heatmap_path = output_dir / f"cross_test_heatmap_{timestamp.strftime('%Y%m%d_%H%M%S')}.png"
@@ -591,7 +621,7 @@ def cross_test(
 def main() -> None:
     import argparse
 
-    parser = argparse.ArgumentParser(description="声纹交叉测试 — 9x9 识别矩阵 (John 组, Xixi, Frank, Qingqing, Zhong 组)")
+    parser = argparse.ArgumentParser(description="声纹交叉测试 — 10x10 识别矩阵 (John 组, Xixi, Frank, Qingqing, Zhong 组)")
     parser.add_argument(
         "--noise",
         default="asset/john/嘈杂环境测试.m4a",

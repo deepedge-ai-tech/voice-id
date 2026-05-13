@@ -123,11 +123,17 @@ class TestEnrollMixed:
         if os.path.exists("/tmp/mixed_test.pkl"):
             os.remove("/tmp/mixed_test.pkl")
 
+        # Disable multi-scale enrollment for this test to verify basic enroll_mixed logic
+        original_setting = client.enable_multi_scale_enrollment
+        client.enable_multi_scale_enrollment = False
+
         result = client.enroll_mixed(
             ["/tmp/clean_test.wav"], ["/tmp/noisy_test.wav"], "/tmp/mixed_test.pkl"
         )
+        client.enable_multi_scale_enrollment = original_setting  # Restore
+
         assert result["ok"] is True
-        assert result["num_segments"] == 3  # 1 + 2 segments
+        assert result["num_segments"] == 3  # 1 + 2 segments (without multi-scale)
         assert os.path.exists("/tmp/mixed_test.pkl")
 
         # Verify the pickle file contains a valid embedding

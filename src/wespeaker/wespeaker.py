@@ -43,7 +43,7 @@ def _load_audio(path: str, target_sr: int = 16000) -> torch.Tensor:
         logger.debug("Loaded with torchaudio: sr=%d, shape=%s", sr, waveform.shape)
         if sr != target_sr:
             waveform = torchaudio.functional.resample(waveform, sr, target_sr)
-        waveform = waveform.mean(dim=0)  # mono
+        waveform = waveform[0]  # 使用左声道，避免相位抵消和 AGC 差异
         return waveform
     except Exception:
         logger.warning("torchaudio failed for %s, trying librosa", path)
@@ -445,6 +445,13 @@ class WespeakerClient:
     noise_dir: str = ""
     sample_rate: int = 16000
     enable_snr_weighting: bool = True  # 注册时按 SNR 加权
+    enable_multi_scale_enrollment: bool = (
+        True  # 注册时加入多尺度短语音 embedding（0.3s, 0.5s, 0.8s）
+    )
+    multi_scale_durations: list[float] = field(
+        default_factory=lambda: [0.3, 0.5, 0.8]
+    )  # 短语音时长（秒）
+    multi_scale_crops_per_duration: int = 3  # 每个时长随机 crop 的数量
 
     # ---- 识别 ----
     sim_threshold: float = 0.55
@@ -455,6 +462,11 @@ class WespeakerClient:
     verify_buffer_keep_secs: float = 8.0  # 验证 buffer 最大保留时长
     enable_vad: bool = True  # 识别时启用 VAD 去静音
     vad_rms_threshold: float = 0.005  # VAD 能量阈值
+    # ---- 滑动窗口识别 ----
+    enable_sliding_window: bool = True  # 启用滑动窗口多窗口识别
+    sliding_window_secs: float = 0.6  # 滑动窗口长度（秒）
+    sliding_hop_secs: float = 0.2  # 滑动窗口步长（秒）
+    sliding_score_mode: str = "max"  # 分数聚合模式: max 或 top_k_mean
 
     # ---- 内部 ----
     _model: Optional[torch.nn.Module] = field(init=False, default=None, repr=False)
@@ -481,6 +493,26 @@ class WespeakerClient:
             waveform[i * seg_len : (i + 1) * seg_len].cpu().numpy()
             for i in range(len(waveform) // seg_len)
         ]
+
+        # 多尺度短语音 embedding（解决 domain mismatch）
+        if self.enable_multi_scale_enrollment:
+            import random
+
+            random.seed(42)  # 固定种子保证可重复性
+            for duration in self.multi_scale_durations:
+                crop_samples = int(duration * self.sample_rate)
+                if waveform.numel() < crop_samples:
+                    continue
+                for _ in range(self.multi_scale_crops_per_duration):
+                    start = random.randint(0, waveform.numel() - crop_samples)
+                    end = start + crop_samples
+                    segment = waveform[start:end].cpu().numpy()
+                    segments.append(segment)
+            logger.debug(
+                "Multi-scale enrollment: added %d short segments, total %d",
+                len(self.multi_scale_durations) * self.multi_scale_crops_per_duration,
+                len(segments),
+            )
 
         # 增强
         if self.enable_augmentation:
@@ -581,9 +613,38 @@ class WespeakerClient:
             )
 
         # 提取 embedding + 比对
-        emb = _extract_embedding(self._model, pcm)
-        emb = F.normalize(emb, dim=0)
-        score = float(torch.dot(emb, ref).clamp(-1.0, 1.0).item())
+        if self.enable_sliding_window and pcm.numel() >= int(
+            self.sliding_window_secs * self.sample_rate
+        ):
+            score, all_scores = _sliding_window_scores(
+                pcm,
+                ref,
+                self._model,
+                self.sliding_window_secs,
+                self.sliding_hop_secs,
+                self.sample_rate,
+                self.sliding_score_mode,
+            )
+            # 对于滑动窗口，使用窗口时长而不是 VAD 时长来计算阈值
+            effective_duration = self.sliding_window_secs
+        else:
+            emb = _extract_embedding(self._model, pcm)
+            emb = F.normalize(emb, dim=0)
+            score = float(torch.dot(emb, ref).clamp(-1.0, 1.0).item())
+            all_scores = [score]
+            effective_duration = vad_duration
+
+        # 如果启用了滑动窗口，重新计算基于窗口时长的动态阈值
+        if self.enable_sliding_window and self.enable_dynamic_threshold:
+            if self.dynamic_threshold_mode == "smooth":
+                threshold = get_dynamic_threshold_smooth(effective_duration)
+            else:
+                threshold = get_dynamic_threshold(effective_duration)
+            logger.debug(
+                "Using sliding-window-aware threshold: %.4f (duration: %.2fs)",
+                threshold,
+                effective_duration,
+            )
 
         logger.debug("Recognition score: %.4f (threshold=%.2f)", score, threshold)
         return {
@@ -591,6 +652,8 @@ class WespeakerClient:
             "confidence": round(score, 4),
             "threshold": threshold,
             "vad_duration": round(vad_duration, 2),
+            "all_scores": [round(s, 4) for s in all_scores],
+            "num_windows": len(all_scores),
         }
 
     # ------------------------------------------------------------------ #
@@ -609,8 +672,23 @@ class WespeakerClient:
             waveform = _load_audio(path, self.sample_rate)
             if waveform.numel() < seg_len:
                 continue
+            # 原始长片段
             for i in range(len(waveform) // seg_len):
                 all_segments.append(waveform[i * seg_len : (i + 1) * seg_len])
+
+            # 多尺度短语音
+            if self.enable_multi_scale_enrollment:
+                import random
+
+                random.seed(42)
+                for duration in self.multi_scale_durations:
+                    crop_samples = int(duration * self.sample_rate)
+                    if waveform.numel() < crop_samples:
+                        continue
+                    for _ in range(self.multi_scale_crops_per_duration):
+                        start = random.randint(0, waveform.numel() - crop_samples)
+                        end = start + crop_samples
+                        all_segments.append(waveform[start:end])
 
         if not all_segments:
             return {"ok": False, "error": "无有效音频片段"}
@@ -664,6 +742,74 @@ def _crop_verify(
     return waveform[-window:] if waveform.numel() > window else waveform
 
 
+def _sliding_window_scores(
+    waveform: torch.Tensor,
+    reference: torch.Tensor,
+    model: torch.nn.Module,
+    window_secs: float,
+    hop_secs: float,
+    sample_rate: int,
+    score_mode: str = "max",
+) -> tuple[float, list[float]]:
+    """使用滑动窗口提取多个 embedding 并计算分数。
+
+    Args:
+        waveform: 音频波形
+        reference: 参考声纹 embedding（已归一化）
+        model: 声纹模型
+        window_secs: 窗口长度（秒）
+        hop_secs: 步长（秒）
+        sample_rate: 采样率
+        score_mode: 分数聚合模式，"max" 或 "top_k_mean"
+
+    Returns:
+        (最终分数, 所有窗口分数列表)
+    """
+    window_samples = int(window_secs * sample_rate)
+    hop_samples = int(hop_secs * sample_rate)
+    total_samples = waveform.numel()
+
+    scores = []
+    positions = []
+
+    for start in range(0, total_samples - window_samples + 1, hop_samples):
+        end = start + window_samples
+        segment = waveform[start:end]
+        emb = _extract_embedding(model, segment)
+        emb = F.normalize(emb, dim=0)
+        score = float(torch.dot(emb, reference).clamp(-1.0, 1.0).item())
+        scores.append(score)
+        positions.append(start / sample_rate)
+
+    if not scores:
+        # 音频太短，使用完整音频
+        emb = _extract_embedding(model, waveform)
+        emb = F.normalize(emb, dim=0)
+        score = float(torch.dot(emb, reference).clamp(-1.0, 1.0).item())
+        return score, [score]
+
+    if score_mode == "max":
+        final_score = max(scores)
+    elif score_mode == "top_k_mean":
+        k = max(1, min(3, len(scores) // 2))  # top 3 或一半
+        top_scores = sorted(scores, reverse=True)[:k]
+        final_score = sum(top_scores) / len(top_scores)
+    else:
+        final_score = max(scores)
+
+    logger.debug(
+        "Sliding window: %d windows, scores=[%.3f, %.3f, ..., %.3f], final=%.3f (mode=%s)",
+        len(scores),
+        scores[0] if scores else 0,
+        scores[len(scores) // 2] if len(scores) > 1 else 0,
+        scores[-1] if scores else 0,
+        final_score,
+        score_mode,
+    )
+
+    return final_score, scores
+
+
 # --------------------------------------------------------------------------- #
 #  CLI 入口
 # --------------------------------------------------------------------------- #
@@ -682,6 +828,9 @@ def main() -> None:
     p_reg.add_argument("--model-path", default="./models/wespeaker")
     p_reg.add_argument("--device", default="cpu")
     p_reg.add_argument("--no-aug", action="store_true")
+    p_reg.add_argument(
+        "--no-multi-scale", action="store_true", help="禁用多尺度短语音注册（0.3s, 0.5s, 0.8s）"
+    )
 
     p_rec = sub.add_parser("recognize", help="识别声纹")
     p_rec.add_argument("audio")
@@ -698,6 +847,19 @@ def main() -> None:
         default="segmented",
         help="动态阈值模式: segmented (分段) 或 smooth (平滑公式)",
     )
+    p_rec.add_argument("--no-sliding-window", action="store_true", help="禁用滑动窗口多窗口识别")
+    p_rec.add_argument(
+        "--sliding-window-secs", type=float, default=0.6, help="滑动窗口长度（秒），默认 0.6"
+    )
+    p_rec.add_argument(
+        "--sliding-hop-secs", type=float, default=0.2, help="滑动窗口步长（秒），默认 0.2"
+    )
+    p_rec.add_argument(
+        "--sliding-score-mode",
+        choices=["max", "top_k_mean"],
+        default="max",
+        help="滑动窗口分数聚合模式: max（最高分）或 top_k_mean（top k 均值）",
+    )
 
     args = parser.parse_args()
 
@@ -706,6 +868,7 @@ def main() -> None:
             model_path=args.model_path,
             device=args.device,
             enable_augmentation=not args.no_aug,
+            enable_multi_scale_enrollment=not args.no_multi_scale,
         )
         r = client.mp3_to_pk(args.audio, args.output)
         logger.info("注册结果: %s", r)
@@ -716,6 +879,10 @@ def main() -> None:
             sim_threshold=args.threshold,
             enable_dynamic_threshold=args.dynamic_threshold,
             dynamic_threshold_mode=args.threshold_mode,
+            enable_sliding_window=not args.no_sliding_window,
+            sliding_window_secs=args.sliding_window_secs,
+            sliding_hop_secs=args.sliding_hop_secs,
+            sliding_score_mode=args.sliding_score_mode,
         )
         r = client.recognize(args.audio, args.voiceprint)
         logger.info("识别结果: %s", r)
