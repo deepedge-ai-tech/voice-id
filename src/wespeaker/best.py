@@ -47,6 +47,7 @@ from .wespeaker import (
     _load_audio,
     get_dynamic_threshold,
     get_dynamic_threshold_smooth,
+    get_score_compensation_factor,
 )
 
 # --------------------------------------------------------------------------- #
@@ -63,10 +64,11 @@ class BestConfig:
     Attributes:
         sim_threshold: 余弦相似度阈值。0.55 时 clean 通过率 98.3%。
             降低会增加误接受，提高会增加误拒绝。
-        enable_dynamic_threshold: 启用基于 VAD 后时长的动态阈值。
-            根据音频长度自动调整阈值，提高短音频的通过率。
-        dynamic_threshold_mode: 动态阈值模式。"segmented" 使用分段阈值，
-            "smooth" 使用平滑对数公式。
+        enable_score_compensation: 启用基于 VAD 后时长的分数补偿。
+            短音频的分数会被乘以大于 1 的系数，使不同时长的音频
+            可以在同一阈值下公平比较。
+        score_compensation_target_duration: 分数补偿的目标标准时长（秒）。
+            默认 2.0 秒，短于此长度的音频会获得分数补偿。
         verify_crop_mode: 验证音频裁剪策略。"full_utterance" 使用完整音频，
             实验表明得分始终高于滑动窗口方式。
         verify_buffer_keep_secs: 验证时最大保留音频长度（秒）。60.0 意味着
@@ -82,8 +84,8 @@ class BestConfig:
     """
 
     sim_threshold: float = 0.55
-    enable_dynamic_threshold: bool = False
-    dynamic_threshold_mode: str = "segmented"
+    enable_score_compensation: bool = False
+    score_compensation_target_duration: float = 2.0
     verify_crop_mode: str = "full_utterance"
     verify_buffer_keep_secs: float = 60.0
     verify_window_secs: float = 1.0
@@ -333,8 +335,8 @@ class WespeakerBest:
         使用 BestConfig 的参数：
           - verify_buffer_keep_secs: 限制最大音频长度
           - enable_vad: 决定是否做 VAD 去静音
-          - sim_threshold: 判定阈值（固定阈值）
-          - enable_dynamic_threshold: 启用动态阈值（基于 VAD 后时长）
+          - sim_threshold: 判定阈值
+          - enable_score_compensation: 启用分数补偿（基于 VAD 后时长）
 
         Args:
             audio_path: 待测试的音频文件路径。
@@ -394,25 +396,32 @@ class WespeakerBest:
         if pcm.numel() == 0:
             return {"is_recognized": False, "confidence": 0.0, "error": "音频太短"}
 
-        # 计算动态阈值
-        threshold = self.config.sim_threshold
-        if self.config.enable_dynamic_threshold:
-            if self.config.dynamic_threshold_mode == "smooth":
-                threshold = get_dynamic_threshold_smooth(vad_duration)
-            else:
-                threshold = get_dynamic_threshold(vad_duration)
+        # 提取 embedding 并计算原始分数
+        emb = F.normalize(_extract_embedding(self._client._model, pcm), dim=0)
+        raw_score = float(torch.dot(emb, ref).clamp(-1.0, 1.0).item())
+
+        # 应用分数补偿（如果启用）
+        score = raw_score
+        if self.config.enable_score_compensation:
+            factor = get_score_compensation_factor(
+                vad_duration, self.config.score_compensation_target_duration
+            )
+            score = raw_score * factor
             logger.debug(
-                "Using dynamic threshold: %.4f (VAD duration: %.2fs)", threshold, vad_duration
+                "Score compensation: %.4f → %.4f (factor: %.2f, VAD duration: %.2fs)",
+                raw_score,
+                score,
+                factor,
+                vad_duration,
             )
 
-        emb = F.normalize(_extract_embedding(self._client._model, pcm), dim=0)
-        score = float(torch.dot(emb, ref).clamp(-1.0, 1.0).item())
-
-        logger.debug("Recognition score: %.4f", score)
+        threshold = self.config.sim_threshold
+        logger.debug("Recognition score: %.4f (threshold: %.4f)", score, threshold)
 
         return {
             "is_recognized": score >= threshold,
             "confidence": round(score, 4),
+            "raw_confidence": round(raw_score, 4),
             "threshold": threshold,
             "vad_duration": round(vad_duration, 2),
         }

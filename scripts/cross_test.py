@@ -1,26 +1,28 @@
 #!/usr/bin/env python3
-"""声纹交叉测试 — 7x7 识别矩阵 (John, John_USB, John_MeetingRoom, Xixi, Frank, Qingqing & Zhong)。
+"""声纹交叉测试 — 10x10 识别矩阵 (John 组, Xixi, Frank, Qingqing, Zhong 组)。
 
 测试场景:
-  注册: John, John_USB, John_MeetingRoom, Xixi, Frank, Qingqing, Zhong (使用 registration_segments 目录)
+  注册: John, John_USB, John_MeetingRoom, John_D_USB, John_D_USB_AEC, Xixi, Frank, Qingqing, Zhong, Zhong_D_USB (使用 registration_segments 目录)
   测试: 每人的 test_segments 目录中所有片段，每个片段单独测试
   裁剪: 超过 2 秒的音频只保留前 2 秒
 
 说话人组:
-  - John 组: John, John_USB, John_MeetingRoom（同一人，不同录制条件）
-  - 其他: Xixi, Frank, Qingqing, Zhong（独立说话人）
+  - John 组: John, John_USB, John_MeetingRoom, John_D_USB, John_D_USB_AEC（同一人，不同录制条件/处理）
+  - Zhong 组: Zhong, Zhong_D_USB（同一人，不同录制条件）
+  - 其他: Xixi, Frank, Qingqing（独立说话人）
 
 预期:
-  - 正确匹配: John 组内相互匹配，其他人只匹配自己 → 通过
+  - 正确匹配: John 组内相互匹配，Zhong 组内相互匹配，其他人只匹配自己 → 通过
   - 正确拒绝: 不同人的测试片段 vs 其他人声纹 → 拒绝
+  - AEC 效果: John_D_USB_AEC 应能与其他 John 变体匹配（测试 AEC 处理对声纹的影响）
 
 用法:
     uv run python scripts/cross_test.py
     uv run python scripts/cross_test.py --noise asset/john/嘈杂环境测试.m4a
     uv run python scripts/cross_test.py --snrs 20,15,10,5,0
     uv run python scripts/cross_test.py --threshold 0.50
-    uv run python scripts/cross_test.py --dynamic-threshold  # 启用动态阈值
-    uv run python scripts/cross_test.py --dynamic-threshold --threshold-mode smooth
+    uv run python scripts/cross_test.py --score-compensation  # 启用分数补偿
+    uv run python scripts/cross_test.py --score-compensation --target-duration 1.5
     uv run python scripts/cross_test.py --output-dir outputs  # 生成图表和报告
     uv run python scripts/cross_test.py --verbose  # 详细输出
     uv run python scripts/cross_test.py --debug  # 调试信息
@@ -31,14 +33,12 @@ import pickle
 import sys
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
-import torch.nn.functional as F
 
 from src.wespeaker import WespeakerBest
 from src.wespeaker.wespeaker import _apply_silero_vad, _crop_to_duration
@@ -75,6 +75,14 @@ SPEAKERS = {
         "register_dir": "asset/john_metting_room/registration_segments",
         "test_segments_dir": "asset/john_metting_room/test_segments",
     },
+    "John_D_USB": {
+        "register_dir": "asset/john_d_usb/registration_segments",
+        "test_segments_dir": "asset/john_d_usb/test_segments",
+    },
+    "John_D_USB_AEC": {
+        "register_dir": "asset/john_d_usb_AEC/registration_segments",
+        "test_segments_dir": "asset/john_d_usb_AEC/test_segments",
+    },
     "Xixi": {
         "register_dir": "asset/xixi/registration_segments",
         "test_segments_dir": "asset/xixi/test_segments",
@@ -91,13 +99,23 @@ SPEAKERS = {
         "register_dir": "asset/zhong/registration_segments",
         "test_segments_dir": "asset/zhong/test_segments",
     },
+    "Zhong_D_USB": {
+        "register_dir": "asset/zhong_d_usb/registration_segments",
+        "test_segments_dir": "asset/zhong_d_usb/test_segments",
+    },
 }
 
-# 同一人组映射：三个 John 变体属于同一人
+# 同一人组映射
+# John 组：五个 John 变体属于同一人（包括 AEC 处理版本）
+# Zhong 组：两个 Zhong 变体属于同一人
 SAME_PERSON_GROUPS: dict[str, set[str]] = {
-    "John": {"John", "John_USB", "John_MeetingRoom"},
-    "John_USB": {"John", "John_USB", "John_MeetingRoom"},
-    "John_MeetingRoom": {"John", "John_USB", "John_MeetingRoom"},
+    "John": {"John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC"},
+    "John_USB": {"John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC"},
+    "John_MeetingRoom": {"John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC"},
+    "John_D_USB": {"John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC"},
+    "John_D_USB_AEC": {"John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC"},
+    "Zhong": {"Zhong", "Zhong_D_USB"},
+    "Zhong_D_USB": {"Zhong", "Zhong_D_USB"},
 }
 
 
@@ -123,13 +141,15 @@ def plot_heatmap(
     output_path: Path | None = None,
 ) -> None:
     """绘制相似度热力图."""
-    fig, ax = plt.subplots(figsize=(12, 10))
+    # 动态调整高度：每个测试片段分配更多空间
+    fig_height = max(16, len(row_labels) * 0.35)
+    fig, ax = plt.subplots(figsize=(18, fig_height))
 
     im = ax.imshow(scores, cmap="RdYlGn", aspect="auto", vmin=-0.2, vmax=1.0)
 
     ax.set_xticks(np.arange(len(col_labels)))
     ax.set_yticks(np.arange(len(row_labels)))
-    ax.set_xticklabels(col_labels, fontsize=10)
+    ax.set_xticklabels(col_labels, fontsize=12)
     ax.set_yticklabels(row_labels, fontsize=9)
 
     plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
@@ -144,20 +164,20 @@ def plot_heatmap(
                 ha="center",
                 va="center",
                 color=text_color,
-                fontsize=7,
+                fontsize=9,
             )
 
     ax.set_title(
         f"声纹交叉识别矩阵 (阈值 = {threshold:.2f})\n"
         f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        fontsize=14,
+        fontsize=16,
         pad=20,
     )
-    ax.set_xlabel("注册声纹", fontsize=12)
-    ax.set_ylabel("测试音频", fontsize=12)
+    ax.set_xlabel("注册声纹", fontsize=14)
+    ax.set_ylabel("测试音频", fontsize=14)
 
     cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-    cbar.set_label("相似度得分", rotation=270, labelpad=20, fontsize=11)
+    cbar.set_label("相似度得分", rotation=270, labelpad=20, fontsize=13)
 
     plt.tight_layout()
 
@@ -235,20 +255,20 @@ def cross_test(
     output_dir: Path | None = None,
     verbose: bool = False,
     debug: bool = False,
-    enable_dynamic_threshold: bool = False,
-    threshold_mode: str = "segmented",
+    enable_score_compensation: bool = False,
+    target_duration: float = 2.0,
 ) -> None:
-    """执行 7x7 交叉测试矩阵，集成诊断数据和报告生成.
+    """执行 9x9 交叉测试矩阵，集成诊断数据和报告生成.
 
     Args:
         noise_path: 噪声音频文件路径
         snr_levels: SNR 级别列表
-        threshold: 识别阈值（固定阈值模式下的默认值）
+        threshold: 识别阈值
         output_dir: 输出目录（可选）
         verbose: 详细输出模式
         debug: 调试模式
-        enable_dynamic_threshold: 启用基于 VAD 时长的动态阈值
-        threshold_mode: 动态阈值模式 ("segmented" 或 "smooth")
+        enable_score_compensation: 启用基于 VAD 时长的分数补偿
+        target_duration: 分数补偿的目标标准时长（秒）
     """
     # 配置日志级别
     if debug:
@@ -263,16 +283,16 @@ def cross_test(
     reporter = TerminalReporter(verbose=verbose, debug=debug)
     metrics = PerformanceMetrics()
 
-    threshold_type = "动态" if enable_dynamic_threshold else "固定"
-    reporter.print_header(threshold, snr_levels, threshold_type)
+    mode = "分数补偿" if enable_score_compensation else "固定"
+    reporter.print_header(threshold, snr_levels, mode)
 
     recognizer = WespeakerBest()
     recognizer.config = recognizer.config.__class__(
         **{
             **vars(recognizer.config),
             "sim_threshold": threshold,
-            "enable_dynamic_threshold": enable_dynamic_threshold,
-            "dynamic_threshold_mode": threshold_mode,
+            "enable_score_compensation": enable_score_compensation,
+            "score_compensation_target_duration": target_duration,
         }
     )
 
@@ -357,10 +377,11 @@ def cross_test(
     errors: dict = {"false_accepts": [], "false_rejects": []}
 
     # 收集用于可视化的数据
-    row_labels: list[str] = []
     col_names = list(SPEAKERS.keys())
-    scores_matrix: list[list[float]] = []
     diagonal_scores: dict[str, list[float]] = {name: [] for name in SPEAKERS.keys()}
+
+    # 先收集所有测试数据，稍后按 VAD 时长排序
+    test_data_list: list[dict] = []
 
     for test_speaker, speaker_data in SPEAKERS.items():
         test_dir = Path(speaker_data["test_segments_dir"])
@@ -369,7 +390,6 @@ def cross_test(
         for audio_file in test_files:
             label = audio_file.name
             row_label = f"{test_speaker}/{label}"
-            row_labels.append(row_label)
             row_scores: list[float] = []
 
             metrics.start(f"recognize_{row_label}")
@@ -481,12 +501,37 @@ def cross_test(
             test_case_dict["row_label"] = row_label
             test_cases.append(test_case_dict)
 
-            scores_matrix.append(row_scores)
+            # 收集到列表中，稍后排序
+            test_data_list.append(
+                {
+                    "test_speaker": test_speaker,
+                    "label": label,
+                    "vad_duration": vad_duration,
+                    "row_scores": row_scores,
+                    "test_case_dict": test_case_dict,
+                }
+            )
 
             if verbose:
                 print(row.rstrip(" |"))
 
-    # 5. 总结
+    # 5. 先按人分组，每个人内部按 VAD 时长降序排序
+    test_data_list.sort(key=lambda x: (x["test_speaker"], -x["vad_duration"]))
+
+    # 构建排序后的 row_labels 和 scores_matrix
+    row_labels: list[str] = []
+    scores_matrix: list[list[float]] = []
+
+    for data in test_data_list:
+        test_speaker = data["test_speaker"]
+        label = data["label"]
+        vad_duration = data["vad_duration"]
+        # row_label 显示 VAD 处理后的时长
+        row_label = f"{test_speaker}/{label} ({vad_duration:.2f}s)"
+        row_labels.append(row_label)
+        scores_matrix.append(data["row_scores"])
+
+    # 6. 总结
     total_tests = len(scores_matrix)
     passed_tests = total_tests - len(errors["false_accepts"]) - len(errors["false_rejects"])
     reporter.print_test_summary(total_tests, passed_tests, errors)
@@ -546,7 +591,7 @@ def cross_test(
 def main() -> None:
     import argparse
 
-    parser = argparse.ArgumentParser(description="声纹交叉测试 — 7x7 识别矩阵 (John, John_USB, John_MeetingRoom, Xixi, Frank, Qingqing & Zhong)")
+    parser = argparse.ArgumentParser(description="声纹交叉测试 — 9x9 识别矩阵 (John 组, Xixi, Frank, Qingqing, Zhong 组)")
     parser.add_argument(
         "--noise",
         default="asset/john/嘈杂环境测试.m4a",
@@ -583,15 +628,15 @@ def main() -> None:
         help="调试模式（打印 embedding 调试信息）",
     )
     parser.add_argument(
-        "--dynamic-threshold",
+        "--score-compensation",
         action="store_true",
-        help="启用基于 VAD 时长的动态阈值",
+        help="启用基于 VAD 时长的分数补偿（短音频分数提升）",
     )
     parser.add_argument(
-        "--threshold-mode",
-        choices=["segmented", "smooth"],
-        default="segmented",
-        help="动态阈值模式 (default: segmented)",
+        "--target-duration",
+        type=float,
+        default=2.0,
+        help="分数补偿目标时长（秒），默认 2.0",
     )
     args = parser.parse_args()
 
@@ -623,8 +668,8 @@ def main() -> None:
         output_path,
         args.verbose,
         args.debug,
-        args.dynamic_threshold,
-        args.threshold_mode,
+        args.score_compensation,
+        args.target_duration,
     )
 
 

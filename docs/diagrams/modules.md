@@ -28,6 +28,8 @@ graph TD
         Split[split_registration.py 音频切分]:::script
         Sliding[test_sliding_window.py 滑动窗口测试]:::script
         Best[best_recognition.py 最佳配置]:::script
+        AEC[apply_aec_processing.py AEC 处理]:::script
+        Cross[cross_test.py 交叉测试]:::script
     end
 
     subgraph tests
@@ -45,6 +47,8 @@ graph TD
     Split --> Wespeaker
     Sliding --> Wespeaker
     Best --> Wespeaker
+    AEC --> Audio
+    Cross --> Wespeaker
     Unit --> Wespeaker
     Conf --> Unit
 ```

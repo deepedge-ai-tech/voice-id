@@ -392,6 +392,36 @@ def get_dynamic_threshold_smooth(vad_duration: float) -> float:
     return max(0.22, min(0.55, base + duration_factor))
 
 
+def get_score_compensation_factor(vad_duration: float, target_duration: float = 2.0) -> float:
+    """根据 VAD 后音频时长计算分数补偿系数.
+
+    短音频的相似度分数会被补偿（乘以大于1的系数），
+    使得不同时长的音频可以在同一阈值下公平比较。
+
+    Args:
+        vad_duration: VAD 处理后的音频时长（秒）
+        target_duration: 目标标准时长（秒），默认 2.0 秒
+
+    Returns:
+        补偿系数，范围 [1.0, 1.5]
+
+    示例:
+        2.0s → 1.0  (标准时长，不补偿)
+        1.5s → 1.08
+        1.0s → 1.17
+        0.5s → 1.33
+        0.3s → 1.5  (极短音频，最大补偿)
+    """
+    if vad_duration >= target_duration:
+        return 1.0
+
+    # 线性补偿：系数 = 1 + (target - actual) / target * max_bonus
+    # 限制最大补偿为 1.5
+    max_bonus = 0.5
+    factor = 1.0 + (target_duration - vad_duration) / target_duration * max_bonus
+    return min(1.5, max(1.0, factor))
+
+
 # --------------------------------------------------------------------------- #
 #  主类
 # --------------------------------------------------------------------------- #
