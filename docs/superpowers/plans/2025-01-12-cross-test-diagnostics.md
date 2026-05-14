@@ -6,7 +6,7 @@
 
 **Architecture:** 新增诊断数据收集模块和报告生成模块，修改主测试脚本集成诊断功能，在底层模块添加 logging 支持
 
-**Tech Stack:** Python 3.12, logging, JSON, Markdown, numpy, torch, matplotlib
+**Tech Stack:** Python 3.10, logging, JSON, Markdown, numpy, torch, matplotlib
 
 ---
 

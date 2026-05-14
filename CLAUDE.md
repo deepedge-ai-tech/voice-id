@@ -7,7 +7,7 @@ WeSpeaker 声纹识别工具 — 独立的声纹注册与识别 CLI 工具。
 
 ## 技术栈
 
-- **语言**: Python 3.12+
+- **语言**: Python 3.10+
 - **包管理**: uv
 - **深度学习**: PyTorch, torchaudio
 - **声纹模型**: pyannote.audio (ResNet34)

@@ -8,7 +8,7 @@ graph TB
     classDef audio fill:#fff3e0,stroke:#f57c00,stroke-width:2px;
 
     subgraph 后端技术栈
-        Python[Python 3.12+]:::backend
+        Python[Python 3.10+]:::backend
         Type[类型注解 typing]:::backend
         Data[dataclass 数据类]:::backend
     end

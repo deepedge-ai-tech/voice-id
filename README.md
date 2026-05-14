@@ -140,7 +140,7 @@ wespeaker/
 
 ## 依赖
 
-- Python 3.12+
+- Python 3.10+
 - torch >= 2.11.0
 - torchaudio >= 2.11.0
 - numpy >= 2.4.4
