@@ -158,12 +158,17 @@ class WespeakerDeep(WespeakerBest):
 
     def __init__(
         self,
-        model_path: str = "./models/wespeaker",
+        model_path: str | None = None,
         device: str = "cpu",
         sample_rate: int = 16000,
         config: DeepConfig | None = None,
     ) -> None:
         self._deep_config = config if config is not None else DeepConfig()
+
+        if model_path is None:
+            from .wespeaker import _get_default_model_path
+
+            model_path = _get_default_model_path()
 
         # 构造兼容的 BestConfig 传给父类
         best_config = BestConfig(

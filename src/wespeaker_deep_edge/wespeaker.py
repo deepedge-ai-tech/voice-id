@@ -16,6 +16,7 @@ import math
 import pickle
 from dataclasses import dataclass, field
 from functools import lru_cache
+from importlib import resources
 from pathlib import Path
 from typing import Optional
 
@@ -24,6 +25,17 @@ import torch
 import torch.nn.functional as F
 
 logger = logging.getLogger(__name__)
+
+
+def _get_default_model_path() -> str:
+    """返回内置模型路径（优先），fallback 到 ./models/wespeaker。"""
+    try:
+        return str(
+            resources.files("wespeaker_deep_edge._models") / "wespeaker"
+        )
+    except (ModuleNotFoundError, TypeError):
+        return "./models/wespeaker"
+
 
 # --------------------------------------------------------------------------- #
 #  音频加载
@@ -435,7 +447,7 @@ class WespeakerClient:
     """
 
     # ---- 模型 ----
-    model_path: str = "./models/wespeaker"
+    model_path: str = field(default_factory=_get_default_model_path)
     device: str = "cpu"
 
     # ---- 注册 ----
