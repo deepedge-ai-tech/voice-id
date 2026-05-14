@@ -6,7 +6,7 @@
   - verify_buffer_keep_secs = 60.0（不截断，使用完整音频）
 
 用法:
-    from wespeaker.best import WespeakerBest, BestConfig
+    from wespeaker_deep_edge.best import WespeakerBest, BestConfig
 
     # 方式 1: 使用默认最佳配置
     recognizer = WespeakerBest(model_path="./models/wespeaker")

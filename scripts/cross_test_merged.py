@@ -1,32 +1,32 @@
 #!/usr/bin/env python3
-"""声纹交叉测试 — 合并音频注册版本。
+"""声纹交叉测试 — WespeakerDeep 版本。
 
-与原 cross_test.py 的区别:
-  - 注册时将所有 speaker 的音频合并为一条音频（不永久保存）
-  - 然后注册合并后的音频，只注册这一条
+使用 WespeakerDeep（继承 WespeakerBest），特点:
+  - 纯净注册（clean-only，不注入噪声，跳过 VAD）
+  - 多模板匹配（每文件独立 embedding，测试时取 max）
+  - 短音频滑动窗口（0.4s/0.15s，仅对 < 1.5s 音频）
+  - sqrt 分数补偿（短音频自动提分）
 
 测试场景:
-  注册: 每人一条合并后的音频（由 registration_segments 目录中所有片段合并）
+  注册: 每人的 registration_segments 目录中所有片段，逐文件注册为独立 template
   测试: 每人的 test_segments 目录中所有片段，每个片段单独测试
   裁剪: 超过 2 秒的音频只保留前 2 秒
 
 说话人组:
-  - John 组: John, John_USB, John_MeetingRoom, John_D_USB, John_D_USB_AEC（同一人，不同录制条件/处理）
-  - Zhong 组: Zhong, Zhong_D_USB（同一人，不同录制条件）
-  - 其他: Xixi, Frank, Qingqing（独立说话人）
+  - John 组: John, John_USB, John_MeetingRoom, John_D_USB, John_D_USB_AEC
+  - Zhong 组: Zhong, Zhong_D_USB
+  - 其他: Xixi, Frank, Qingqing
 
 用法:
     uv run python scripts/cross_test_merged.py
-    uv run python scripts/cross_test_merged.py --noise asset/john/嘈杂环境测试.m4a
-    uv run python scripts/cross_test_merged.py --snrs 20,15,10,5,0
     uv run python scripts/cross_test_merged.py --threshold 0.50
     uv run python scripts/cross_test_merged.py --output-dir outputs
+    uv run python scripts/cross_test_merged.py --verbose
 """
 
 import logging
 import pickle
 import sys
-import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -37,18 +37,18 @@ import numpy as np
 import torch
 import torchaudio
 
-from src.wespeaker import WespeakerBest
-from src.wespeaker.diagnostics import (
+from wespeaker_deep_edge.wespeaker_deep_dege import WespeakerDeep, DeepConfig
+from wespeaker_deep_edge.diagnostics import (
     PerformanceMetrics,
     RecognitionDiagnostics,
     RegistrationDiagnostics,
 )
-from src.wespeaker.reporters import (
+from wespeaker_deep_edge.reporters import (
     JsonDataExporter,
     MarkdownReportGenerator,
     TerminalReporter,
 )
-from src.wespeaker.wespeaker import _apply_silero_vad, _crop_to_duration
+from wespeaker_deep_edge.wespeaker import _apply_silero_vad, _crop_to_duration
 
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
 
@@ -102,7 +102,6 @@ SPEAKERS = {
     },
 }
 
-# 同一人组映射
 SAME_PERSON_GROUPS: dict[str, set[str]] = {
     "John": {"John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC"},
     "John_USB": {"John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC"},
@@ -115,50 +114,11 @@ SAME_PERSON_GROUPS: dict[str, set[str]] = {
 
 
 def is_same_person(speaker1: str, speaker2: str) -> bool:
-    """判断两个说话人是否属于同一人（考虑同一人的不同录制条件）."""
+    """判断两个说话人是否属于同一人."""
     if speaker1 == speaker2:
         return True
     group1 = SAME_PERSON_GROUPS.get(speaker1, {speaker1})
     return speaker2 in group1
-
-
-def merge_audio_files(
-    audio_files: list[Path],
-    output_path: Path,
-    sample_rate: int = 16000,
-) -> tuple[int, float]:
-    """将多个音频文件合并为一个文件.
-
-    Args:
-        audio_files: 音频文件路径列表
-        output_path: 输出文件路径
-        sample_rate: 目标采样率
-
-    Returns:
-        (合并后的采样点数, 合并后的时长秒数)
-    """
-    all_waveforms = []
-
-    for audio_file in audio_files:
-        waveform, sr = torchaudio.load(audio_file)
-        # 转换为单声道
-        if waveform.shape[0] > 1:
-            waveform = waveform.mean(dim=0, keepdim=True)
-        # 重采样到目标采样率
-        if sr != sample_rate:
-            resampler = torchaudio.transforms.Resample(sr, sample_rate)
-            waveform = resampler(waveform)
-        all_waveforms.append(waveform)
-
-    # 拼接所有音频
-    merged = torch.cat(all_waveforms, dim=1)
-
-    # 保存合并后的音频
-    torchaudio.save(str(output_path), merged, sample_rate)
-
-    num_samples = merged.shape[1]
-    duration = num_samples / sample_rate
-    return num_samples, duration
 
 
 # --------------------------------------------------------------------------- #
@@ -189,21 +149,15 @@ def plot_heatmap(
     for i in range(len(row_labels)):
         for j in range(len(col_labels)):
             text_color = "white" if scores[i, j] < threshold else "black"
-            text = ax.text(
-                j,
-                i,
-                f"{scores[i, j]:.3f}",
-                ha="center",
-                va="center",
-                color=text_color,
-                fontsize=9,
+            ax.text(
+                j, i, f"{scores[i, j]:.3f}",
+                ha="center", va="center", color=text_color, fontsize=9,
             )
 
     ax.set_title(
-        f"声纹交叉识别矩阵 (阈值 = {threshold:.2f}) — 合并音频注册\n"
+        f"声纹交叉识别矩阵 (WespeakerDeep thresh={threshold:.2f})\n"
         f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        fontsize=16,
-        pad=20,
+        fontsize=16, pad=20,
     )
     ax.set_xlabel("注册声纹", fontsize=14)
     ax.set_ylabel("测试音频", fontsize=14)
@@ -216,9 +170,6 @@ def plot_heatmap(
     if output_path:
         plt.savefig(output_path, dpi=300, bbox_inches="tight")
         print(f"\n📊 热力图已保存: {output_path}")
-    else:
-        plt.show()
-
     plt.close()
 
 
@@ -236,17 +187,15 @@ def plot_summary_bar(
     width = 0.6
 
     fig, ax = plt.subplots(figsize=(10, 6))
-
     bars = ax.bar(x, avg_scores, width, label="平均得分", capsize=5, color="#4CAF50")
 
     for i, (avg, min_val) in enumerate(zip(avg_scores, min_scores)):
         ax.errorbar(i, avg, yerr=avg - min_val, fmt="none", ecolor="black", capsize=5)
 
     ax.axhline(y=threshold, color="red", linestyle="--", linewidth=2, label=f"阈值 ({threshold})")
-
     ax.set_xlabel("说话人", fontsize=12)
     ax.set_ylabel("相似度得分", fontsize=12)
-    ax.set_title("各说话人自识别得分统计 — 合并音频注册", fontsize=14)
+    ax.set_title("各说话人自识别得分统计 — WespeakerDeep", fontsize=14)
     ax.set_xticks(x)
     ax.set_xticklabels(speakers)
     ax.legend()
@@ -256,12 +205,8 @@ def plot_summary_bar(
     for bar, score in zip(bars, avg_scores):
         height = bar.get_height()
         ax.text(
-            bar.get_x() + bar.get_width() / 2.0,
-            height + 0.02,
-            f"{score:.3f}",
-            ha="center",
-            va="bottom",
-            fontsize=10,
+            bar.get_x() + bar.get_width() / 2.0, height + 0.02,
+            f"{score:.3f}", ha="center", va="bottom", fontsize=10,
         )
 
     plt.tight_layout()
@@ -269,9 +214,6 @@ def plot_summary_bar(
     if output_path:
         plt.savefig(output_path, dpi=300, bbox_inches="tight")
         print(f"📊 柱状图已保存: {output_path}")
-    else:
-        plt.show()
-
     plt.close()
 
 
@@ -280,19 +222,15 @@ def plot_summary_bar(
 # --------------------------------------------------------------------------- #
 
 
-def cross_test_merged(
-    noise_path: str,
-    snr_levels: list[float],
+def cross_test_deep(
     threshold: float,
     output_dir: Path | None = None,
     verbose: bool = False,
     debug: bool = False,
 ) -> None:
-    """执行交叉测试矩阵 — 使用合并音频注册.
+    """执行交叉测试矩阵 — 使用 WespeakerDeep.
 
     Args:
-        noise_path: 噪声音频文件路径
-        snr_levels: SNR 级别列表
         threshold: 识别阈值
         output_dir: 输出目录（可选）
         verbose: 详细输出模式
@@ -309,36 +247,21 @@ def cross_test_merged(
     reporter = TerminalReporter(verbose=verbose, debug=debug)
     metrics = PerformanceMetrics()
 
-    reporter.print_header(threshold, snr_levels, "合并音频注册")
+    reporter.print_header(threshold, [], "WespeakerDeep 纯净注册 + 多模板匹配")
 
-    recognizer = WespeakerBest()
-    recognizer.config = recognizer.config.__class__(
-        **{
-            **vars(recognizer.config),
-            "sim_threshold": threshold,
-        }
-    )
+    # 1. 创建 recognizer + 加载模型
+    deep_config = DeepConfig(sim_threshold=threshold)
+    recognizer = WespeakerDeep(config=deep_config)
 
-    # 1. 加载模型
     metrics.start("model_load")
     recognizer._client._ensure_model()
     metrics.end("model_load")
 
-    # 2. 提取噪声 profile
     if verbose:
-        print(f"\n提取噪声 profile: {noise_path}")
-    noise_profile = WespeakerBest.extract_noise_profile(noise_path)
-    if verbose:
-        print(f"  噪声长度: {len(noise_profile) / 16000:.1f}s")
+        print(f"\n模型已加载，阈值 = {threshold}")
 
-    # 3. 注册所有说话人（合并音频方式）
+    # 2. 注册所有说话人（每文件独立 template）
     voiceprints: dict[str, torch.Tensor] = {}
-    tmp_pk = Path("/tmp/voice_cross_merged.pkl")
-    tmp_pk.parent.mkdir(parents=True, exist_ok=True)
-
-    # 创建临时目录用于合并音频
-    temp_dir = Path(tempfile.mkdtemp(prefix="cross_test_merged_"))
-
     registration_data: dict[str, dict] = {}
 
     for name, paths in SPEAKERS.items():
@@ -348,7 +271,6 @@ def cross_test_merged(
         metrics.start(f"registration_{name}")
         reg_diag = RegistrationDiagnostics(speaker=name)
 
-        # 收集注册片段信息
         reg_path = Path(reg_dir)
         segment_files = sorted(reg_path.glob("*.wav")) + sorted(reg_path.glob("*.m4a"))
 
@@ -356,67 +278,30 @@ def cross_test_merged(
             print(f"警告: {name} 的注册目录中没有音频文件")
             continue
 
-        # 合并所有音频到一个临时文件
-        merged_audio_path = temp_dir / f"{name}_merged.wav"
-        num_samples, duration = merge_audio_files(segment_files, merged_audio_path)
+        # 直接传注册目录，保留每文件独立 embedding（多模板）
+        speaker_pk = Path(f"/tmp/voice_deep_{name}.pkl")
+        result = recognizer.enroll(str(reg_dir), pk_path=str(speaker_pk))
 
-        if verbose:
-            print(f"  合并 {len(segment_files)} 个片段 → {duration:.2f}s ({num_samples} 采样点)")
-
-        # 创建临时目录，只包含合并后的音频
-        merged_dir = temp_dir / f"{name}_merged_dir"
-        merged_dir.mkdir(exist_ok=True)
-        merged_single_path = merged_dir / "merged.wav"
-
-        # 将合并后的音频复制到临时目录（模拟单个文件）
-        import shutil
-
-        shutil.copy(merged_audio_path, merged_single_path)
-
-        # 执行注册（只注册这一条合并后的音频）
-        result = recognizer.enroll(str(merged_dir), noise_profile, str(tmp_pk), snr_levels)
-        voiceprints[name] = result["embedding"]
-
-        # 添加合并音频信息到诊断
-        reg_diag.add_segment(
-            "merged_audio",
-            duration,
-            16000,
-            result["embedding"],
+        voiceprints[name] = torch.from_numpy(
+            np.asarray(result["reference"], dtype=np.float32)
         )
 
-        # 记录噪声注入效果
-        for snr in snr_levels:
-            reg_diag.record_noise_injection(
-                snr_level=snr,
-                original_rms=0.1,
-                mixed_rms=0.1 * 10 ** (-snr / 20),
-            )
+        if verbose:
+            print(f"  {result['num_segments']} files → {result['num_templates']} templates")
 
+        reg_diag.add_segment("deep_enroll", 0, 16000, voiceprints[name])
         metrics.end(f"registration_{name}")
         registration_data[name] = reg_diag.to_dict()
         reporter.print_registration_summary(name, registration_data[name])
 
         if debug:
-            reporter.print_debug_embedding(f"{name} embedding", result["embedding"])
+            reporter.print_debug_embedding(f"{name} embedding", voiceprints[name])
 
-    # 清理临时目录
-    import shutil
-
-    shutil.rmtree(temp_dir)
-
-    # 4. 交叉识别矩阵
+    # 3. 交叉识别矩阵
     SPEAKER_ORDER = [
-        "John",
-        "John_USB",
-        "John_MeetingRoom",
-        "John_D_USB",
-        "John_D_USB_AEC",
-        "Zhong",
-        "Zhong_D_USB",
-        "Xixi",
-        "Frank",
-        "Qingqing",
+        "John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC",
+        "Zhong", "Zhong_D_USB",
+        "Xixi", "Frank", "Qingqing",
     ]
 
     ordered_speakers = [name for name in SPEAKER_ORDER if name in SPEAKERS]
@@ -436,11 +321,11 @@ def cross_test_merged(
     test_cases: list[dict] = []
     errors: dict = {"false_accepts": [], "false_rejects": []}
 
-    col_names = list(SPEAKERS.keys())
     diagonal_scores: dict[str, list[float]] = {name: [] for name in SPEAKERS.keys()}
     col_order_map = {name: i for i, name in enumerate(SPEAKER_ORDER) if name in SPEAKERS}
 
     test_data_list: list[dict] = []
+    tmp_audio = Path("/tmp/test_audio_deep.wav")
 
     for test_speaker, speaker_data in SPEAKERS.items():
         test_dir = Path(speaker_data["test_segments_dir"])
@@ -476,18 +361,15 @@ def cross_test_merged(
                 vad_duration=vad_duration,
             )
 
-            temp_audio_path = tmp_pk.parent / "temp_test_audio.wav"
-            torchaudio.save(str(temp_audio_path), waveform_final.unsqueeze(0), sr)
+            torchaudio.save(str(tmp_audio), waveform_final.unsqueeze(0), sr)
 
             if verbose:
                 row = f"{row_label:>30} |"
 
             for ref_name in ordered_speakers:
-                ref_emb = voiceprints[ref_name]
-                with open(tmp_pk, "wb") as f:
-                    pickle.dump(ref_emb.cpu().numpy(), f)
-
-                result = recognizer.recognize(str(temp_audio_path), str(tmp_pk))
+                # 直接使用注册时保存的 .pkl（含多模板）
+                ref_pk = Path(f"/tmp/voice_deep_{ref_name}.pkl")
+                result = recognizer.recognize(str(tmp_audio), str(ref_pk))
                 score = result["confidence"]
                 is_match = result["is_recognized"]
 
@@ -501,35 +383,30 @@ def cross_test_merged(
                     recog_diag.confidence = float(score)
                     if not is_match:
                         recog_diag.record_false_negative(float(score))
-                        errors["false_rejects"].append(
-                            {
-                                "test_speaker": test_speaker,
-                                "test_variant": label,
-                                "ref_speaker": ref_name,
-                                "score": float(score),
-                                "threshold_distance": threshold - float(score),
-                            }
-                        )
+                        errors["false_rejects"].append({
+                            "test_speaker": test_speaker,
+                            "test_variant": label,
+                            "ref_speaker": ref_name,
+                            "score": float(score),
+                            "threshold_distance": threshold - float(score),
+                        })
                         all_passed = False
                 else:
                     if is_match:
                         recog_diag.record_false_positive(ref_name, float(score))
-                        errors["false_accepts"].append(
-                            {
-                                "test_speaker": test_speaker,
-                                "test_variant": label,
-                                "mistaken_as": ref_name,
-                                "score": float(score),
-                                "threshold_distance": float(score) - threshold,
-                            }
-                        )
+                        errors["false_accepts"].append({
+                            "test_speaker": test_speaker,
+                            "test_variant": label,
+                            "mistaken_as": ref_name,
+                            "score": float(score),
+                            "threshold_distance": float(score) - threshold,
+                        })
                         all_passed = False
 
                 if verbose:
-                    mark = "✅" if is_match else "❌"
                     ok = is_match if same_person else not is_match
                     status = "✅" if ok else "⚠️ "
-                    row += f" {score:.4f} {mark} {status} |"
+                    row += f" {score:.4f} {status} |"
                 else:
                     reporter.print_recognition_progress(row_label, ref_name, float(score), is_match)
 
@@ -539,67 +416,112 @@ def cross_test_merged(
             test_case_dict["row_label"] = row_label
             test_cases.append(test_case_dict)
 
-            test_data_list.append(
-                {
-                    "test_speaker": test_speaker,
-                    "label": label,
-                    "vad_duration": vad_duration,
-                    "row_scores": row_scores,
-                    "test_case_dict": test_case_dict,
-                }
-            )
+            test_data_list.append({
+                "test_speaker": test_speaker,
+                "label": label,
+                "vad_duration": vad_duration,
+                "row_scores": row_scores,
+                "test_case_dict": test_case_dict,
+            })
 
             if verbose:
                 print(row.rstrip(" |"))
 
-    # 5. 排序
+    # 4. 排序
     test_data_list.sort(key=lambda x: (x["test_speaker"], -x["vad_duration"]))
 
     row_labels: list[str] = []
     scores_matrix: list[list[float]] = []
 
     for data in test_data_list:
-        test_speaker = data["test_speaker"]
-        label = data["label"]
-        vad_duration = data["vad_duration"]
-        row_label = f"{test_speaker}/{label} ({vad_duration:.2f}s)"
+        row_label = f"{data['test_speaker']}/{data['label']} ({data['vad_duration']:.2f}s)"
         row_labels.append(row_label)
         row_scores = data["row_scores"]
         reordered_scores = [row_scores[i] for i in sorted(col_order_map.values())]
         scores_matrix.append(reordered_scores)
 
-    # 6. 总结
-    total_tests = len(scores_matrix)
-    passed_tests = total_tests - len(errors["false_accepts"]) - len(errors["false_rejects"])
+    # 5. 计算指标
+    n_test_files = len(scores_matrix)
+    n_refs = len(ordered_speakers)
+    total_tests = n_test_files * n_refs
+    total_positives = sum(
+        1 for d in test_data_list
+        for ref_name in ordered_speakers
+        if is_same_person(d["test_speaker"], ref_name)
+    )
+    total_negatives = total_tests - total_positives
+
+    false_accepts = len(errors["false_accepts"])
+    false_rejects = len(errors["false_rejects"])
+    far = false_accepts / total_negatives if total_negatives > 0 else 0
+    frr = false_rejects / total_positives if total_positives > 0 else 0
+    passed_tests = total_tests - false_accepts - false_rejects
+    accuracy = passed_tests / total_tests if total_tests > 0 else 0
+
+    # 短音频统计
+    short_scores = []
+    short_genuine_scores = []
+    for d in test_data_list:
+        if d["vad_duration"] < 1.5:
+            for i, ref_name in enumerate(ordered_speakers):
+                s = d["row_scores"][i]
+                short_scores.append(s)
+                if is_same_person(d["test_speaker"], ref_name):
+                    short_genuine_scores.append(s)
+
+    short_conf = np.mean(short_scores) if short_scores else 0
+    short_genuine_conf = np.mean(short_genuine_scores) if short_genuine_scores else 0
+
+    # 同人置信度
+    all_genuine = []
+    for d in test_data_list:
+        for i, ref_name in enumerate(ordered_speakers):
+            if is_same_person(d["test_speaker"], ref_name):
+                all_genuine.append(d["row_scores"][i])
+    genuine_avg = np.mean(all_genuine) if all_genuine else 0
+
+    # 6. 打印总结
+    print(f"\n{'=' * 70}")
+    print("  WespeakerDeep 交叉测试结果")
+    print(f"{'=' * 70}")
+    print(f"  阈值:           {threshold:.4f}")
+    print(f"  总测试数:       {total_tests}")
+    print(f"  通过:           {passed_tests}")
+    print(f"  误接受 (FA):    {false_accepts}")
+    print(f"  误拒绝 (FR):    {false_rejects}")
+    print(f"  FAR:            {far:.4f} ({far*100:.2f}%)")
+    print(f"  FRR:            {frr:.4f} ({frr*100:.2f}%)")
+    print(f"  EER:            {(far+frr)/2:.4f}")
+    print(f"  准确率:         {accuracy:.4f} ({accuracy*100:.2f}%)")
+    print(f"  同人平均置信度: {genuine_avg:.4f}")
+    print(f"  短音频平均:     {short_conf:.4f}")
+    print(f"  短音频同人:     {short_genuine_conf:.4f}")
+    print(f"{'=' * 70}")
+
     reporter.print_test_summary(total_tests, passed_tests, errors)
 
     # 7. 生成图表和报告
     if output_dir:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
-
         timestamp = datetime.now()
 
         scores_array = np.array(scores_matrix)
         ordered_col_names = [name for name in SPEAKER_ORDER if name in SPEAKERS]
         col_labels = [f"{name} 声纹" for name in ordered_col_names]
 
-        heatmap_path = (
-            output_dir / f"cross_test_merged_heatmap_{timestamp.strftime('%Y%m%d_%H%M%S')}.png"
-        )
+        heatmap_path = output_dir / f"deep_heatmap_{timestamp.strftime('%Y%m%d_%H%M%S')}.png"
         plot_heatmap(scores_array, row_labels, col_labels, threshold, heatmap_path)
 
-        bar_path = (
-            output_dir / f"cross_test_merged_summary_{timestamp.strftime('%Y%m%d_%H%M%S')}.png"
-        )
+        bar_path = output_dir / f"deep_summary_{timestamp.strftime('%Y%m%d_%H%M%S')}.png"
         plot_summary_bar(diagonal_scores, threshold, bar_path)
 
         report_data = {
             "meta": {
                 "threshold": threshold,
-                "snr_levels": snr_levels,
-                "noise_path": str(noise_path),
-                "registration_method": "merged_audio",
+                "snr_levels": [],
+                "noise_path": "",
+                "registration_method": "deep_clean_only_multi_template",
             },
             "registration": registration_data,
             "recognition": {
@@ -629,45 +551,24 @@ def cross_test_merged(
 def main() -> None:
     import argparse
 
-    parser = argparse.ArgumentParser(description="声纹交叉测试 — 合并音频注册版本")
+    parser = argparse.ArgumentParser(description="声纹交叉测试 — WespeakerDeep 版本")
     parser.add_argument(
-        "--noise",
-        default="asset/john/嘈杂环境测试.m4a",
-        help="噪声音频文件（用于注册时噪声注入）",
+        "--threshold", type=float, default=0.50,
+        help="识别阈值 (default: 0.50)",
     )
     parser.add_argument(
-        "--snrs",
-        default="20,15,10,5,0",
-        help="SNR 级别，逗号分隔 (default: 20,15,10,5,0)",
-    )
-    parser.add_argument(
-        "--threshold",
-        type=float,
-        default=0.55,
-        help="识别阈值 (default: 0.55)",
-    )
-    parser.add_argument(
-        "--output-dir",
-        "-o",
-        type=str,
-        default=None,
+        "--output-dir", "-o", type=str, default=None,
         help="图表和报告输出目录（不指定则不生成）",
     )
     parser.add_argument(
-        "--verbose",
-        "-v",
-        action="store_true",
+        "--verbose", "-v", action="store_true",
         help="详细输出模式",
     )
     parser.add_argument(
-        "--debug",
-        "-d",
-        action="store_true",
-        help="调试模式（打印 embedding 调试信息）",
+        "--debug", "-d", action="store_true",
+        help="调试模式",
     )
     args = parser.parse_args()
-
-    snr_levels = [float(x.strip()) for x in args.snrs.split(",")]
 
     # 验证文件存在
     for speaker_name, speaker_data in SPEAKERS.items():
@@ -682,19 +583,9 @@ def main() -> None:
         if not list(test_dir.glob("*.wav")):
             print(f"错误: 测试片段目录中没有 .wav 文件: {test_dir}")
             sys.exit(1)
-    if not Path(args.noise).is_file():
-        print(f"错误: 噪声音频不存在: {args.noise}")
-        sys.exit(1)
 
     output_path = Path(args.output_dir) if args.output_dir else None
-    cross_test_merged(
-        args.noise,
-        snr_levels,
-        args.threshold,
-        output_path,
-        args.verbose,
-        args.debug,
-    )
+    cross_test_deep(args.threshold, output_path, args.verbose, args.debug)
 
 
 if __name__ == "__main__":

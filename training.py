@@ -104,11 +104,29 @@ NOISE_INJECTION_SNRS = [30.0, 25.0, 20.0, 15.0, 10.0, 5.0, 0.0]  # SNR 级别 �
 NOISE_PATH = "extract-noisy+pink"  # 当前最佳：提取噪声 + 粉红噪声混合
 
 # ---- 滑动窗口参数 ----
-SLIDING_WINDOW_SECS = 0.6  # 滑动窗口长度 [0.3 - 3.0]
-SLIDING_HOP_SECS = 0.2  # 滑动步长 [0.1 - 1.0]
+SLIDING_WINDOW_SECS = 0.4  # 滑动窗口长度（更细粒度捕捉最佳匹配段）[0.3 - 3.0]
+SLIDING_HOP_SECS = 0.15  # 滑动步长（更多窗口覆盖）[0.1 - 1.0]
 
 # ---- 测试音频处理 ----
 TEST_CROP_SECS = 10.0  # 测试音频最大裁剪长度 [2.0 - 60.0]
+
+# ---- 注册增强控制 ----
+ENROLLMENT_SKIP_VAD = True  # True = 注册时跳过 VAD（与测试条件对称，已验证提升置信度）
+ENROLL_NO_NOISE = False  # True = 注册时不注入噪声，只使用干净片段（极致纯净声纹）
+ENROLL_CLEAN_ONLY = True  # True = 仅使用干净片段（不加噪声）来构建声纹
+
+# ---- 多模板匹配 ----
+MULTI_TEMPLATE_MATCH = True  # True = 保留每个注册片段 embedding，测试时取 max（不平均）
+
+# ---- 滑动窗口测试（仅对短音频）----
+SLIDING_WINDOW_TEST = False  # True = 对短音频使用滑动窗口取 max 分数
+
+# ---- 短音频最低时长 ----
+MIN_TEST_SECS = 1.0  # 短音频最低 padding 时长（避免循环重复损害 embedding）
+
+# ---- 注册分片（多模板模式下生效）----
+TEMPLATE_CHUNK_SECS = 0  # 每个模板片段长度（0 = 不分片，使用整文件；>0 虽多模板但可能引入噪声）
+TEMPLATE_CHUNK_OVERLAP = 0.5  # 片段重叠比例
 
 # ---- 输出控制 ----
 VERBOSE = False  # 详细输出模式
@@ -416,6 +434,7 @@ def cross_test(
 
     # 3. 注册所有说话人（合并音频方式）
     voiceprints: dict[str, torch.Tensor] = {}
+    multi_templates: dict[str, list[torch.Tensor]] = {}  # 多模板：每个注册片段一个 embedding
 
     # 创建临时目录用于合并音频和临时文件
     import tempfile
@@ -442,19 +461,81 @@ def cross_test(
 
         # 执行注册（分段注册方式）
         enroll_snrs = config.noise_injection_snrs if config.noise_injection_snrs else [40.0]
-        result = recognizer.enroll(str(reg_path), noise_profile, str(tmp_pk), enroll_snrs)
-        voiceprints[name] = result["embedding"]
+        if ENROLL_CLEAN_ONLY:
+            # 极致纯净注册：不注入噪声，不做 VAD，只用干净片段
+            from src.wespeaker.wespeaker import _load_audio
 
-        if config.verbose:
+            clean_paths = sorted(Path(reg_dir).glob("*.wav"))
+            all_embs = []
+            chunk_len = int(TEMPLATE_CHUNK_SECS * recognizer._client.sample_rate) if MULTI_TEMPLATE_MATCH and TEMPLATE_CHUNK_SECS > 0 else 0
+            hop_len = int(chunk_len * (1 - TEMPLATE_CHUNK_OVERLAP)) if chunk_len > 0 else 0
+            for cp in clean_paths:
+                seg = _load_audio(str(cp), recognizer._client.sample_rate)
+                if not ENROLLMENT_SKIP_VAD:
+                    seg = _apply_silero_vad(seg, recognizer._client.sample_rate)
+                if chunk_len > 0 and seg.numel() > chunk_len:
+                    # 切分成重叠片段
+                    for start in range(0, seg.numel() - chunk_len + 1, hop_len):
+                        chunk = seg[start:start + chunk_len]
+                        emb = _extract_embedding(recognizer._client._model, chunk)
+                        all_embs.append(F.normalize(emb, dim=0))
+                else:
+                    emb = _extract_embedding(recognizer._client._model, seg)
+                    all_embs.append(F.normalize(emb, dim=0))
+            if MULTI_TEMPLATE_MATCH:
+                multi_templates[name] = all_embs  # 保留每个片段的独立 embedding
+            ref = F.normalize(torch.stack(all_embs).mean(dim=0), dim=0)
+            voiceprints[name] = ref
+            if config.verbose:
+                tag = "纯净" if ENROLLMENT_SKIP_VAD else "纯净+VAD"
+                logger.info(f"  注册（{tag}）{len(clean_paths)} 个片段 = {len(all_embs)} embeddings")
+        elif ENROLLMENT_SKIP_VAD:
+            # 自定义注册：跳过 VAD 以匹配测试条件，保留噪声注入
+            from src.wespeaker.wespeaker import _load_audio
+
+            clean_paths = sorted(Path(reg_dir).glob("*.wav"))
+            all_embs = []
+            chunk_len = int(TEMPLATE_CHUNK_SECS * recognizer._client.sample_rate) if MULTI_TEMPLATE_MATCH and TEMPLATE_CHUNK_SECS > 0 else 0
+            hop_len = int(chunk_len * (1 - TEMPLATE_CHUNK_OVERLAP)) if chunk_len > 0 else 0
+            for cp in clean_paths:
+                seg = _load_audio(str(cp), recognizer._client.sample_rate)
+                if chunk_len > 0 and seg.numel() > chunk_len:
+                    seg_np = seg.cpu().numpy()
+                    for start in range(0, seg.numel() - chunk_len + 1, hop_len):
+                        chunk = seg_np[start:start + chunk_len]
+                        for snr in enroll_snrs:
+                            from src.wespeaker.best import _mix_noise_at_snr
+                            mixed = _mix_noise_at_snr(chunk, noise_profile, snr)
+                            emb = _extract_embedding(recognizer._client._model, torch.from_numpy(mixed))
+                            all_embs.append(F.normalize(emb, dim=0))
+                else:
+                    seg_np = seg.cpu().numpy()
+                    for snr in enroll_snrs:
+                        from src.wespeaker.best import _mix_noise_at_snr
+                        mixed = _mix_noise_at_snr(seg_np, noise_profile, snr)
+                        emb = _extract_embedding(recognizer._client._model, torch.from_numpy(mixed))
+                        all_embs.append(F.normalize(emb, dim=0))
+            if MULTI_TEMPLATE_MATCH:
+                multi_templates[name] = all_embs  # 保留每个片段的独立 embedding
+            ref = F.normalize(torch.stack(all_embs).mean(dim=0), dim=0)
+            voiceprints[name] = ref
+            if config.verbose:
+                logger.info(f"  注册（无VAD）{len(clean_paths)} 个分段 × {len(enroll_snrs)} SNR = {len(all_embs)} embeddings")
+        else:
+            result = recognizer.enroll(str(reg_path), noise_profile, str(tmp_pk), enroll_snrs)
+            voiceprints[name] = result["embedding"]
+
+        if config.verbose and not ENROLL_CLEAN_ONLY:
             logger.info(f"  注册 {result['num_segments']} 个分段 × {len(enroll_snrs)} SNR = {result['total_enrollments']} embeddings")
 
-        # 记录噪声注入效果
-        for snr in config.noise_injection_snrs:
-            reg_diag.record_noise_injection(
-                snr_level=snr,
-                original_rms=0.1,
-                mixed_rms=0.1 * 10 ** (-snr / 20),
-            )
+        # 记录噪声注入效果（仅在非纯净注册时）
+        if not ENROLL_CLEAN_ONLY:
+            for snr in config.noise_injection_snrs:
+                reg_diag.record_noise_injection(
+                    snr_level=snr,
+                    original_rms=0.1,
+                    mixed_rms=0.1 * 10 ** (-snr / 20),
+                )
 
         metrics.end(f"registration_{name}")
         registration_data[name] = reg_diag.to_dict()
@@ -517,7 +598,6 @@ def cross_test(
                 vad_duration = original_duration  # track original duration for short audio metric
             waveform_final = _crop_to_duration(waveform_vad, TEST_CROP_SECS, sr)
             # Pad short audio to minimum duration for better embedding quality
-            MIN_TEST_SECS = 1.0
             min_test_samples = int(MIN_TEST_SECS * sr)
             if waveform_final.numel() < min_test_samples:
                 repeats = min_test_samples // waveform_final.numel() + 1
@@ -536,17 +616,61 @@ def cross_test(
             temp_audio_path = temp_dir / "temp_test_audio.wav"
             torchaudio.save(str(temp_audio_path), waveform_final.unsqueeze(0), sr)
 
-            # Extract test embedding once for use with multi-embedding max-similarity
-            test_emb = F.normalize(
-                _extract_embedding(recognizer._client._model, waveform_final), dim=0
-            )
+            # Decide whether to use sliding window test (short audio only: avoids false peaks on long audio)
+            is_short = vad_duration < SHORT_AUDIO_DURATION_NO_VAD
+            use_sliding = SLIDING_WINDOW_TEST and is_short and vad_duration >= 0.2
+
+            if use_sliding:
+                # Sliding window: extract embeddings from multiple windows, take max score
+                window_samples = int(SLIDING_WINDOW_SECS * sr)
+                hop_samples = int(SLIDING_HOP_SECS * sr)
+                if window_samples < int(0.3 * sr):
+                    window_samples = int(0.3 * sr)
+                wf_len = waveform_final.numel()
+                window_embs = []
+                for start in range(0, max(1, wf_len - window_samples + 1), hop_samples):
+                    end = min(start + window_samples, wf_len)
+                    win = waveform_final[start:end]
+                    if win.numel() < int(0.3 * sr):
+                        repeats = int(0.3 * sr) // win.numel() + 1
+                        win = win.repeat(repeats)[:int(0.3 * sr)]
+                    emb = _extract_embedding(recognizer._client._model, win)
+                    window_embs.append(F.normalize(emb, dim=0))
+                if not window_embs:
+                    window_embs = [F.normalize(
+                        _extract_embedding(recognizer._client._model, waveform_final), dim=0
+                    )]
+            else:
+                # Single embedding from full audio
+                test_emb = F.normalize(
+                    _extract_embedding(recognizer._client._model, waveform_final), dim=0
+                )
 
             if config.verbose:
                 row = f"{row_label:>30} |"
 
             for ref_name in ordered_speakers:
                 ref_emb = voiceprints[ref_name]
-                score = float(torch.dot(test_emb, ref_emb).clamp(-1.0, 1.0))
+                templates = multi_templates.get(ref_name, [ref_emb]) if MULTI_TEMPLATE_MATCH else [ref_emb]
+                if use_sliding:
+                    # Sliding window + multi-template: max across all combos
+                    best = -1.0
+                    for we in window_embs:
+                        for t in templates:
+                            s = float(torch.dot(we, t).clamp(-1.0, 1.0))
+                            if s > best:
+                                best = s
+                    score = best
+                elif MULTI_TEMPLATE_MATCH and len(templates) > 1:
+                    # Multi-template: max similarity across all enrollment templates
+                    template_scores = [float(torch.dot(test_emb, t).clamp(-1.0, 1.0)) for t in templates]
+                    score = max(template_scores)
+                else:
+                    score = float(torch.dot(test_emb, ref_emb).clamp(-1.0, 1.0))
+                # Apply score compensation for short audio (vad_duration < target)
+                if ENABLE_SCORE_COMPENSATION and vad_duration < SCORE_COMPENSATION_TARGET_DURATION:
+                    factor = min((SCORE_COMPENSATION_TARGET_DURATION / max(vad_duration, 0.3)) ** 0.5, 2.0)
+                    score = min(score * factor, 1.0)
                 is_match = score >= config.sim_threshold
 
                 recog_diag.add_comparison(ref_name, float(score), is_match)
@@ -789,6 +913,10 @@ def create_config_from_args() -> ExperimentConfig:
     parser.add_argument("--vad-threshold", type=float, default=VAD_RMS_THRESHOLD, help="VAD 能量阈值")
     parser.add_argument("--verbose", "-v", action="store_true", help="详细输出")
     parser.add_argument("--debug", "-d", action="store_true", help="调试模式")
+    parser.add_argument("--enroll-skip-vad", action="store_true", help="注册时跳过 VAD（与测试条件对称）")
+    parser.add_argument("--enroll-clean-only", action="store_true", help="注册时不注入噪声，只使用干净片段")
+    parser.add_argument("--sliding-window-test", action="store_true", help="对短音频使用滑动窗口取 max 分数")
+    parser.add_argument("--multi-template", action="store_true", help="多模板匹配：保留每个注册片段，取 max 分数")
     parser.add_argument("--from-best", action="store_true", help="从 best_config.json 加载配置")
 
     args = parser.parse_args()
@@ -801,6 +929,17 @@ def create_config_from_args() -> ExperimentConfig:
 
     # 否则使用命令行参数（或顶部默认值）
     snr_levels = [float(x.strip()) for x in args.snrs.split(",") if x.strip()] if args.snrs.strip() else []
+
+    # 应用模块级参数覆盖
+    global ENROLLMENT_SKIP_VAD, ENROLL_CLEAN_ONLY, SLIDING_WINDOW_TEST, MULTI_TEMPLATE_MATCH
+    if args.enroll_skip_vad:
+        ENROLLMENT_SKIP_VAD = True
+    if args.enroll_clean_only:
+        ENROLL_CLEAN_ONLY = True
+    if args.sliding_window_test:
+        SLIDING_WINDOW_TEST = True
+    if args.multi_template:
+        MULTI_TEMPLATE_MATCH = True
 
     return ExperimentConfig(
         sim_threshold=args.threshold,

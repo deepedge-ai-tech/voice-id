@@ -18,11 +18,17 @@ from .wespeaker import (
     _load_model,
     _vad_segments,
 )
+from .wespeaker_deep_dege import (
+    DeepConfig,
+    WespeakerDeep,
+)
 
 __all__ = [
     "WespeakerClient",
     "WespeakerBest",
     "BestConfig",
+    "WespeakerDeep",
+    "DeepConfig",
     "_crop_verify",
     "_estimate_snr",
     "_extract_embedding",

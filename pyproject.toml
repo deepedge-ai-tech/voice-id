@@ -1,5 +1,5 @@
 [project]
-name = "wespeaker"
+name = "wespeaker-deep-edge"
 version = "0.1.0"
 description = "WeSpeaker 声纹识别工具 — 独立的声纹注册与识别 CLI 工具"
 readme = "README.md"
@@ -33,23 +33,23 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/wespeaker"
-Documentation = "https://github.com/yourusername/wespeaker#readme"
-Repository = "https://github.com/yourusername/wespeaker"
-"Bug Tracker" = "https://github.com/yourusername/wespeaker/issues"
+Homepage = "https://github.com/yourusername/wespeaker-deep-edge"
+Documentation = "https://github.com/yourusername/wespeaker-deep-edge#readme"
+Repository = "https://github.com/yourusername/wespeaker-deep-edge"
+"Bug Tracker" = "https://github.com/yourusername/wespeaker-deep-edge/issues"
 
 [project.scripts]
-wespeaker = "src.wespeaker.wespeaker:main"
+wespeaker-deep-edge = "wespeaker_deep_edge.wespeaker:main"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools]
-packages = ["src.wespeaker"]
+[tool.setuptools.packages.find]
+where = ["src"]
 
 [tool.setuptools.package-data]
-"src.wespeaker" = ["*.yaml", "*.yml", "*.json", "*.txt"]
+"wespeaker_deep_edge" = ["*.yaml", "*.yml", "*.json", "*.txt"]
 
 [dependency-groups]
 dev = [
@@ -65,7 +65,7 @@ pythonpath = ["."]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
-addopts = "-v --cov=src/wespeaker --cov-report=term-missing --cov-fail-under=30"
+addopts = "-v --cov=src/wespeaker_deep_edge --cov-report=term-missing --cov-fail-under=30"
 
 [tool.black]
 line-length = 100

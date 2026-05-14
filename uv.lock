@@ -3257,7 +3257,7 @@ wheels = [
 ]
 
 [[package]]
-name = "wespeaker"
+name = "wespeaker-deep-edge"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

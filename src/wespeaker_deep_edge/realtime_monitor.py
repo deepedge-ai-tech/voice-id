@@ -7,9 +7,9 @@ recognition against an enrolled voiceprint, and displays real-time status
 in the terminal.
 
 Usage:
-    uv run python -m wespeaker.realtime_monitor
-    uv run python -m wespeaker.realtime_monitor --voiceprint asset/john/voice_best.pkl
-    uv run python -m wespeaker.realtime_monitor --window-secs 3.0 --threshold 0.50
+    uv run python -m wespeaker_deep_edge.realtime_monitor
+    uv run python -m wespeaker_deep_edge.realtime_monitor --voiceprint asset/john/voice_best.pkl
+    uv run python -m wespeaker_deep_edge.realtime_monitor --window-secs 3.0 --threshold 0.50
 """
 
 import argparse
