@@ -9,7 +9,7 @@ import pytest
 import torch
 import torch.nn.functional as F
 
-from src.wespeaker.wespeaker import (
+from src.wespeaker_deep_edge.wespeaker import (
     WespeakerClient,
     _crop_verify,
     _extract_embedding,

@@ -8,7 +8,7 @@ import numpy as np
 import pytest
 import torch
 
-from src.wespeaker.diagnostics import (
+from src.wespeaker_deep_edge.diagnostics import (
     PerformanceMetrics,
     RecognitionDiagnostics,
     RegistrationDiagnostics,

@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from src.wespeaker.reporters import (
+from src.wespeaker_deep_edge.reporters import (
     JsonDataExporter,
     MarkdownReportGenerator,
     TerminalReporter,

@@ -50,21 +50,17 @@ result = client.recognize("test.mp3", "voice.pkl")
 print(f"识别结果: {result}")
 ```
 
-### 使用最佳配置
+### 使用最佳配置（推荐）
 
 ```python
-from wespeaker.best import WespeakerBest, BestConfig
+from wespeaker_deep_edge.wespeaker_deep_dege import WespeakerDeep
 
-# 初始化（使用默认最佳配置）
-recognizer = WespeakerBest(model_path="./models/wespeaker")
+# 默认参数即为 18 轮实验验证的最优配置，无需额外设置
+recognizer = WespeakerDeep(model_path="./models/wespeaker")
 
-# 提取噪声 profile（用于注册时噪声注入）
-noise_profile = WespeakerBest.extract_noise_profile("noise.wav")
-
-# 注册声纹（multi-SNR 真实噪声注入）
+# 注册声纹（纯干净注册 + 多模板）
 recognizer.enroll(
     clean_dir="registration_segments/",
-    noise_profile=noise_profile,
     pk_path="voice.pkl"
 )
 
@@ -72,7 +68,54 @@ recognizer.enroll(
 result = recognizer.recognize("test_audio.wav", "voice.pkl")
 ```
 
+### 使用旧版最佳配置
+
+```python
+from wespeaker_deep_edge.best import WespeakerBest, BestConfig
+
+recognizer = WespeakerBest(model_path="./models/wespeaker")
+
+# 提取噪声 profile
+noise_profile = WespeakerBest.extract_noise_profile("noise.wav")
+
+# 注册（multi-SNR 噪声注入）
+recognizer.enroll(
+    clean_dir="registration_segments/",
+    noise_profile=noise_profile,
+    pk_path="voice.pkl"
+)
+
+result = recognizer.recognize("test_audio.wav", "voice.pkl")
+```
+
 ## 最佳配置参数
+
+以下配置经 18 轮自动实验验证并通过 `cross_test_merged.py` 交叉测试确认。
+
+### WespeakerDeep（推荐，当前最优）
+
+| 参数 | 值 | 说明 |
+|------|------|------|
+| sim_threshold | **0.50** | 余弦相似度阈值 |
+| verify_crop_mode | head_window | 超长音频保留头部 |
+| verify_buffer_keep_secs | 60.0 | 不截断音频 |
+| verify_window_secs | 0.4 | 短音频滑动窗口长度 |
+| enrollment_segment_secs | 0.6 | 注册片段长度 |
+| enable_vad | False | 完整音频得分更高 |
+| enable_score_compensation | True | sqrt 补偿短音频分数 |
+| score_compensation_mode | sqrt | sqrt 模式补偿 |
+| score_compensation_target_duration | 2.0 | 补偿目标时长 |
+| enroll_skip_vad | True | 注册时跳过 VAD |
+| enroll_clean_only | True | 纯净注册，不注入噪声 |
+| enable_multi_template | True | 多模板匹配（取 max） |
+| enable_sliding_window_test | False | 短音频滑动窗口（默认关闭，避免推高 FAR） |
+| short_audio_max_duration | 1.5 | 短音频判定阈值（秒） |
+| noise_injection_snrs | () | 无噪声注入 |
+
+**注册流程**: 纯干净注册 → 每文件独立 embedding → 多模板保存
+**识别流程**: 多模板 max 匹配 → sqrt 分数补偿 → 短音频自动提分
+
+### WespeakerBest（旧方案，供参考）
 
 | 参数 | 值 | 说明 |
 |------|------|------|
