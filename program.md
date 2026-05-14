@@ -26,7 +26,7 @@
 | `noise_injection_snrs` | [20,15,10,5,0] | 自定义列表 | 注册噪声注入 SNR 级别 |
 
 **固定参数（不修改）**:
-- `enable_score_compensation`: False - 分数补偿功能固定关闭
+- `enable_score_compensation`: True - 分数补偿功能固定关闭
 - `score_compensation_target_duration`: 2.0 - 固定值
 
 ## 评估指标

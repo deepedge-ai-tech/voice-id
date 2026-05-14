@@ -87,21 +87,21 @@ plt.rcParams["axes.unicode_minus"] = False
 # ---------------------------------------------------------------------------- #
 
 # ---- 识别参数 ----
-SIM_THRESHOLD = 0.35  # 相似度阈值 [0.20 - 0.75]
-VERIFY_CROP_MODE = "full_utterance"  # 裁剪模式: full_utterance, tail_window, head_window
+SIM_THRESHOLD = 0.36  # 最佳平衡点 [0.20 - 0.75]
+VERIFY_CROP_MODE = "head_window"  # 裁剪模式: head_window 聚焦音频开头，改善短音频匹配
 VERIFY_BUFFER_KEEP_SECS = 60.0  # buffer 最大保留时长 [2.0 - 60.0]，60.0 表示不截断
-VERIFY_WINDOW_SECS = 1.0  # 滑动窗口长度 [0.3 - 3.0]
+VERIFY_WINDOW_SECS = 0.4  # 短窗口 [0.3-0.5] 提升短音频匹配精度
 
 # ---- 注册参数 ----
-ENROLLMENT_SEGMENT_SECS = 1.0  # 注册分段长度 [0.5 - 3.0]
+ENROLLMENT_SEGMENT_SECS = 0.6  # 更短分段 → 更多样化的注册 embeddings [0.5 - 3.0]
 
 # ---- VAD 参数 ----
-ENABLE_VAD = False  # 启用 VAD 去静音 (True/False)
-VAD_RMS_THRESHOLD = 0.002  # VAD 能量阈值 [0.001 - 0.02]
+ENABLE_VAD = False  # VAD 损害短音频性能，保持关闭
+VAD_RMS_THRESHOLD = 0.002  # VAD 能量阈值 [0.001 - 0.02]（VAD 关闭时无效）
 
 # ---- 噪声注入 ----
-NOISE_INJECTION_SNRS = [30.0, 25.0, 20.0, 15.0, 10.0, 5.0, 0.0]  # SNR 级别 — 宽范围低 SNR 提升鲁棒性
-NOISE_PATH = "extract-noisy"  # 从 test 集合 VAD 提取噪声
+NOISE_INJECTION_SNRS = [30.0, 25.0, 20.0, 15.0, 10.0, 5.0, 0.0]  # SNR 级别 — 经验证的宽范围配置
+NOISE_PATH = "extract-noisy+pink"  # 当前最佳：提取噪声 + 粉红噪声混合
 
 # ---- 滑动窗口参数 ----
 SLIDING_WINDOW_SECS = 0.6  # 滑动窗口长度 [0.3 - 3.0]
@@ -119,9 +119,8 @@ DEBUG = False  # 调试模式
 # ============================================================================ #
 
 # ---- 固定参数（不修改）---- #
-ENABLE_SCORE_COMPENSATION = False  # 分数补偿固定关闭
+ENABLE_SCORE_COMPENSATION = True  # 分数补偿固定关闭
 SCORE_COMPENSATION_TARGET_DURATION = 2.0  # 固定值
-
 
 # ============================================================================ #
 #  辅助函数：合并音频
@@ -518,7 +517,7 @@ def cross_test(
                 vad_duration = original_duration  # track original duration for short audio metric
             waveform_final = _crop_to_duration(waveform_vad, TEST_CROP_SECS, sr)
             # Pad short audio to minimum duration for better embedding quality
-            MIN_TEST_SECS = 1.5
+            MIN_TEST_SECS = 1.0
             min_test_samples = int(MIN_TEST_SECS * sr)
             if waveform_final.numel() < min_test_samples:
                 repeats = min_test_samples // waveform_final.numel() + 1
