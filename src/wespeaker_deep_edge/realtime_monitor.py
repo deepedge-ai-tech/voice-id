@@ -20,7 +20,8 @@ from pathlib import Path
 
 import numpy as np
 
-from . import wespeaker
+from .wespeaker import _extract_embedding
+from .wespeaker_deep_dege import WespeakerDeep
 
 logger = logging.getLogger(__name__)
 
@@ -203,7 +204,7 @@ class RealtimeMonitor:
         import torch.nn.functional as F
 
         waveform = torch.from_numpy(audio)
-        emb = F.normalize(wespeaker._extract_embedding(self.model, waveform), dim=0)
+        emb = F.normalize(_extract_embedding(self.model, waveform), dim=0)
         return float(torch.dot(emb, self.voiceprint).clamp(-1.0, 1.0).item())
 
     def _format_display(self, score: float | None, rms: float, elapsed: float) -> str:
@@ -286,10 +287,7 @@ class RealtimeMonitor:
 
 def main() -> None:
     """CLI entry point."""
-    import pickle
-
     import torch
-    import torch.nn.functional as F
 
     parser = argparse.ArgumentParser(description="WeSpeaker 实时声纹监控 — 麦克风实时识别")
     parser.add_argument(
@@ -330,21 +328,17 @@ def main() -> None:
         )
         sys.exit(1)
 
-    # Load voiceprint
-    with open(vp_path, "rb") as f:
-        vp_data = pickle.load(f)
-    voiceprint = F.normalize(torch.from_numpy(np.asarray(vp_data, dtype=np.float32)), dim=0)
-
     # Initialize model
-    client = wespeaker.WespeakerClient(
-        model_path=args.model_path, device=args.device, enable_augmentation=False
-    )
-    client._ensure_model()
+    client = WespeakerDeep(model_path=args.model_path, device=args.device)
+    client._client._ensure_model()
+
+    # Load voiceprint (handles both old array format and new dict format)
+    voiceprint = torch.from_numpy(client.load(vp_path))
 
     # Start monitoring
     monitor = RealtimeMonitor(
         voiceprint=voiceprint,
-        model=client._model,
+        model=client._client._model,
         device=args.device,
         window_secs=args.window_secs,
         step_secs=args.step_secs,

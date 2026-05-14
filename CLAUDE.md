@@ -26,41 +26,32 @@ WeSpeaker 声纹识别工具 — 独立的声纹注册与识别 CLI 工具。
 
 ```
 wespeaker/
-├── src/                          # 源代码
-│   └── wespeaker/
-│       ├── __init__.py
-│       └── wespeaker.py          # WespeakerClient 核心类
-├── tests/                        # 测试（与 src 结构对应）
-│   └── wespeaker/
-│       ├── __init__.py
-│       ├── conftest.py           # 共享 fixtures
-│       └── test_wespeaker.py     # 核心功能测试
-├── scripts/                      # 可执行脚本
-│   ├── best_recognition.py       # 最佳配置注册与识别（multi-SNR 噪声注入）
-│   ├── experiment_noise_optimization.py    # 四种优化方案对比实验
-│   ├── experiment_train_noise_injection.py # 训练阶段噪声注入实验
-│   ├── split_registration.py     # 按静音间隔切分注册音频
-│   └── test_sliding_window.py    # 滑动窗口对比测试
-├── docs/                         # 文档
-│   ├── diagrams/                 # 项目图表（6 种 Mermaid 图）
-│   │   ├── architecture.md
-│   │   ├── data-flow.md
-│   │   ├── sequence.md
-│   │   ├── modules.md
-│   │   ├── tech-stack.md
-│   │   └── roadmap.md
-│   └── test-plan.md              # 测试方案文档
-├── asset/                        # 音频素材（不提交到 git）
-│   └── john/
-│       ├── registration_segments/ # 注册片段
-│       ├── test_clean_segments/   # 安静环境测试
-│       └── test_noise_segments/   # 嘈杂环境测试
-├── models/                       # 预训练模型（不提交到 git）
-├── pyproject.toml               # 项目配置
-├── uv.lock                       # 锁定依赖
-├── .gitignore
+├── src/wespeaker_deep_edge/       # 源代码
+│   ├── __init__.py
+│   ├── __main__.py                # CLI 入口
+│   ├── wespeaker.py               # WespeakerClient 核心类
+│   ├── best.py                    # WespeakerBest（旧方案，multi-SNR 噪声注入）
+│   ├── wespeaker_deep_dege.py     # WespeakerDeep（当前最优方案）
+│   ├── diagnostics.py             # 诊断工具
+│   ├── reporters.py               # 报告生成
+│   ├── realtime_monitor.py        # 实时监控
+│   └── _models/wespeaker/         # 内置预训练模型（打包进 whl）
+│       ├── pytorch_model.bin      # ResNet34 权重 (25MB)
+│       └── config.yaml            # 模型配置
+├── tests/                         # 测试
+│   ├── wespeaker/                 # WespeakerClient + Best 测试
+│   └── wespeaker_deep_edge/       # WespeakerDeep 测试
+├── scripts/                       # 可执行脚本
+│   ├── cross_test_merged.py       # 交叉测试（WespeakerDeep，验证最佳配置）
+│   ├── test_whl_isolated.sh       # whl 隔离环境测试（打包前必跑）
+│   ├── best_recognition.py        # 最佳配置注册与识别
+│   ├── split_registration.py      # 按静音间隔切分注册音频
+│   └── test_sliding_window.py     # 滑动窗口对比测试
+├── asset/                         # 音频素材（不提交到 git）
+├── models/                        # 符号链接 → HuggingFace 缓存（开发用，不打包）
+├── dist/                          # whl 产物（不提交到 git）
+├── pyproject.toml
 ├── CLAUDE.md
-├── AGENT.md
 └── README.md
 ```
 
@@ -82,11 +73,17 @@ uv run black . && uv run isort .
 # 提交前检查
 uv run pytest --cov && uv run black . && uv run isort .
 
+# 构建 whl（含内置模型，打包前必须先跑单元测试 + 隔离测试）
+uv run pytest && bash scripts/test_whl_isolated.sh && uv build --wheel
+
+# 隔离环境测试（安装 whl → 全套验证，支持传入素材目录）
+bash scripts/test_whl_isolated.sh [asset_dir]
+
 # 注册声纹
-uv run python -m src.wespeaker.wespeaker enroll audio.wav voice.pkl
+uv run python -m wespeaker_deep_edge.wespeaker enroll audio.wav voice.pkl
 
 # 识别声纹
-uv run python -m src.wespeaker.wespeaker recognize audio.wav voice.pkl
+uv run python -m wespeaker_deep_edge.wespeaker recognize audio.wav voice.pkl
 
 # 切分注册音频
 uv run python scripts/split_registration.py asset/john/注册.aif asset/john/registration_segments
@@ -108,16 +105,24 @@ uv run python -m wespeaker.realtime_monitor --voiceprint asset/john/voice_best.p
 uv run python -m wespeaker.realtime_monitor --list-devices
 ```
 
-## 最佳配置（基于实验结果）
+## 最佳配置（18 轮实验验证 + cross_test_merged.py 交叉测试确认）
 
-| 参数 | 值 | 来源 |
+全部为 `WespeakerDeep` / `DeepConfig` 默认值，无需额外设置。
+
+| 参数 | 值 | 说明 |
 |------|------|------|
-| sim_threshold | **0.55** | 动态阈值分析 — clean 通过率 98.3% |
-| verify_crop_mode | **full_utterance** | full utterance 得分始终高于滑动窗口 |
-| verify_buffer_keep_secs | **60.0** | 不截断，使用完整音频 |
-| enable_vad | **False** | 实验表明完整音频得分高于 VAD 去静音后 |
-| 注册增强 | **multi-SNR 真实噪声注入** | 最优方案 — noisy +0.058, clean -0.038 |
-| SNR 级别 | 20, 15, 10, 5, 0 dB | 多级别覆盖不同噪声强度 |
+| sim_threshold | **0.50** | 余弦相似度阈值 |
+| verify_crop_mode | head_window | 超长音频保留头部 |
+| verify_buffer_keep_secs | 60.0 | 不截断音频 |
+| enable_vad | False | 完整音频得分更高 |
+| enable_score_compensation | True | sqrt 补偿短音频分数 |
+| enroll_skip_vad | True | 注册跳过 VAD |
+| enroll_clean_only | True | 纯干净注册，不注入噪声 |
+| enable_multi_template | True | 多模板匹配（取 max） |
+| enable_sliding_window_test | False | 短音频滑动窗口（默认关闭） |
+
+**注册流程**: 纯净注册 → 每文件独立 embedding → 多模板保存
+**识别流程**: 多模板 max 匹配 → sqrt 分数补偿 → 短音频自动提分
 
 ## 核心 API
 
@@ -132,8 +137,17 @@ uv run python -m wespeaker.realtime_monitor --list-devices
 - [ ] 代码符合命名规范（文件名 kebab-case，函数/变量 snake_case，类 PascalCase）
 - [ ] 函数包含类型注解和 docstring
 - [ ] 测试已编写或更新，pytest 全部通过
-- [ ] 测试覆盖率 ≥ 80%
+- [ ] 测试覆盖率 ≥ 30%（pyproject.toml 阈值）
 - [ ] 代码已格式化（black + isort）
 - [ ] 不使用 print()（使用 logging）
 - [ ] 不使用裸 except
-- [ ] 项目图表已更新（6 种 Mermaid 图）
+
+## 打包 whl 前必须
+
+**顺序执行，任何一步失败则停止：**
+
+1. **单元测试**: `uv run pytest`
+2. **隔离测试**: `bash scripts/test_whl_isolated.sh`
+3. **构建**: `uv build --wheel`
+
+隔离测试会创建独立 venv → 安装 whl → 验证模型加载、embedding 提取、注册+识别全流程，以及真实素材批量测试（13/16 通过基准）。

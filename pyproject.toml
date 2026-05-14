@@ -1,6 +1,6 @@
 [project]
 name = "wespeaker-deep-edge"
-version = "0.1.3"
+version = "0.1.4"
 description = "WeSpeaker 声纹识别工具 — 独立的声纹注册与识别 CLI 工具"
 readme = "README.md"
 license = "MIT"
