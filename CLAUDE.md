@@ -142,12 +142,13 @@ uv run python -m wespeaker.realtime_monitor --list-devices
 - [ ] 不使用 print()（使用 logging）
 - [ ] 不使用裸 except
 
-## 打包 whl 前必须
+## 发布流程
 
 **顺序执行，任何一步失败则停止：**
 
 1. **单元测试**: `uv run pytest`
 2. **隔离测试**: `bash scripts/test_whl_isolated.sh`
-3. **构建**: `uv build --wheel`
+3. **构建 whl**: `uv build --wheel`
+4. **打 tag 并推送**: `git tag v0.1.x && git push origin v0.1.x`
 
 隔离测试会创建独立 venv → 安装 whl → 验证模型加载、embedding 提取、注册+识别全流程，以及真实素材批量测试（13/16 通过基准）。
