@@ -42,7 +42,8 @@ import numpy as np
 import torch
 
 from src.wespeaker import WespeakerBest
-from src.wespeaker.wespeaker import _apply_silero_vad, _crop_to_duration
+from src.wespeaker.wespeaker import _apply_silero_vad, _crop_to_duration, _extract_embedding
+import torch.nn.functional as F
 from src.wespeaker.diagnostics import (
     PerformanceMetrics,
     RecognitionDiagnostics,
@@ -68,6 +69,8 @@ from prepare import (
     EXPERIMENTS_DIR,
     BEST_CONFIG_PATH,
     SPEAKER_ORDER,
+    SHORT_AUDIO_DURATION_VAD,
+    SHORT_AUDIO_DURATION_NO_VAD,
 )
 
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
@@ -97,12 +100,15 @@ ENABLE_VAD = False  # 启用 VAD 去静音 (True/False)
 VAD_RMS_THRESHOLD = 0.002  # VAD 能量阈值 [0.001 - 0.02]
 
 # ---- 噪声注入 ----
-NOISE_INJECTION_SNRS = [30.0, 25.0, 20.0, 15.0, 10.0, 5.0, 0.0]  # SNR 级别列表
-NOISE_PATH = "extract-noisy"  # 从 test 集合中提取噪声（替代真实录音文件）
+NOISE_INJECTION_SNRS = [30.0, 25.0, 20.0, 15.0, 10.0, 5.0, 0.0]  # SNR 级别 — 宽范围低 SNR 提升鲁棒性
+NOISE_PATH = "extract-noisy"  # 从 test 集合 VAD 提取噪声
 
 # ---- 滑动窗口参数 ----
 SLIDING_WINDOW_SECS = 0.6  # 滑动窗口长度 [0.3 - 3.0]
 SLIDING_HOP_SECS = 0.2  # 滑动步长 [0.1 - 1.0]
+
+# ---- 测试音频处理 ----
+TEST_CROP_SECS = 10.0  # 测试音频最大裁剪长度 [2.0 - 60.0]
 
 # ---- 输出控制 ----
 VERBOSE = False  # 详细输出模式
@@ -380,6 +386,23 @@ def cross_test(
                         all_noise_parts.append(seg)
         if all_noise_parts:
             noise_profile = torch.cat(all_noise_parts).numpy()
+            # 可选混合合成噪声 (extract-noisy+pink 或 extract-noisy+white)
+            if "+pink" in noise_path_lower or "+white" in noise_path_lower:
+                blend_type = "pink" if "+pink" in noise_path_lower else "white"
+                synth_len = len(noise_profile)
+                if blend_type == "pink":
+                    synth_white = np.random.randn(synth_len)
+                    fft = np.fft.rfft(synth_white)
+                    freq = np.fft.rfftfreq(synth_len, d=1/sample_rate)
+                    fft[freq > 0] /= np.sqrt(freq[freq > 0])
+                    synth_noise = np.fft.irfft(fft, n=synth_len).astype(np.float32)
+                    synth_noise /= np.std(synth_noise) + 1e-12
+                else:
+                    synth_noise = np.random.randn(synth_len).astype(np.float32)
+                noise_profile = 0.5 * noise_profile + 0.5 * synth_noise[:synth_len]
+                noise_profile = noise_profile.astype(np.float32)
+                if config.verbose:
+                    logger.info(f"  混合 {blend_type} 噪声 (50%)")
             if config.verbose:
                 logger.info(f"  从 {len(all_noise_parts)} 个噪声段提取, 总长 {len(noise_profile)/sample_rate:.1f}s")
         else:
@@ -418,34 +441,13 @@ def cross_test(
             logger.warning(f"{name} 的注册目录中没有音频文件")
             continue
 
-        # 合并所有音频到一个临时文件
-        merged_audio_path = temp_dir / f"{name}_merged.wav"
-        num_samples, duration = merge_audio_files(segment_files, merged_audio_path)
-
-        if config.verbose:
-            logger.info(f"  合并 {len(segment_files)} 个片段 → {duration:.2f}s ({num_samples} 采样点)")
-
-        # 创建临时目录，只包含合并后的音频
-        merged_dir = temp_dir / f"{name}_merged_dir"
-        merged_dir.mkdir(exist_ok=True)
-        merged_single_path = merged_dir / "merged.wav"
-
-        # 将合并后的音频复制到临时目录
-        shutil.copy(merged_audio_path, merged_single_path)
-
-        # 执行注册（只注册这一条合并后的音频）
-        # 如果 SNR 列表为空，使用极低噪声（40dB ≈ 无噪声）的纯静音注册
+        # 执行注册（分段注册方式）
         enroll_snrs = config.noise_injection_snrs if config.noise_injection_snrs else [40.0]
-        result = recognizer.enroll(str(merged_dir), noise_profile, str(tmp_pk), enroll_snrs)
+        result = recognizer.enroll(str(reg_path), noise_profile, str(tmp_pk), enroll_snrs)
         voiceprints[name] = result["embedding"]
 
-        # 添加合并音频信息到诊断
-        reg_diag.add_segment(
-            "merged_audio",
-            duration,
-            16000,
-            result["embedding"],
-        )
+        if config.verbose:
+            logger.info(f"  注册 {result['num_segments']} 个分段 × {len(enroll_snrs)} SNR = {result['total_enrollments']} embeddings")
 
         # 记录噪声注入效果
         for snr in config.noise_injection_snrs:
@@ -507,9 +509,20 @@ def cross_test(
             waveform, sr = torchaudio.load(audio_file)
             original_duration = waveform.shape[1] / sr
             waveform_mono = waveform.mean(dim=0)
-            waveform_vad = _apply_silero_vad(waveform_mono, sr)
-            vad_duration = waveform_vad.shape[0] / sr
-            waveform_final = _crop_to_duration(waveform_vad, 2.0, sr)
+            # Only apply Silero VAD when enabled (preserves more audio for short files)
+            if config.enable_vad:
+                waveform_vad = _apply_silero_vad(waveform_mono, sr)
+                vad_duration = waveform_vad.shape[0] / sr
+            else:
+                waveform_vad = waveform_mono
+                vad_duration = original_duration  # track original duration for short audio metric
+            waveform_final = _crop_to_duration(waveform_vad, TEST_CROP_SECS, sr)
+            # Pad short audio to minimum duration for better embedding quality
+            MIN_TEST_SECS = 1.5
+            min_test_samples = int(MIN_TEST_SECS * sr)
+            if waveform_final.numel() < min_test_samples:
+                repeats = min_test_samples // waveform_final.numel() + 1
+                waveform_final = waveform_final.repeat(repeats)[:min_test_samples]
             final_duration = waveform_final.shape[0] / sr
             rms_energy = float(waveform_final.norm())
 
@@ -524,17 +537,18 @@ def cross_test(
             temp_audio_path = temp_dir / "temp_test_audio.wav"
             torchaudio.save(str(temp_audio_path), waveform_final.unsqueeze(0), sr)
 
+            # Extract test embedding once for use with multi-embedding max-similarity
+            test_emb = F.normalize(
+                _extract_embedding(recognizer._client._model, waveform_final), dim=0
+            )
+
             if config.verbose:
                 row = f"{row_label:>30} |"
 
             for ref_name in ordered_speakers:
                 ref_emb = voiceprints[ref_name]
-                with open(tmp_pk, "wb") as f:
-                    pickle.dump(ref_emb.cpu().numpy(), f)
-
-                result = recognizer.recognize(str(temp_audio_path), str(tmp_pk))
-                score = result["confidence"]
-                is_match = result["is_recognized"]
+                score = float(torch.dot(test_emb, ref_emb).clamp(-1.0, 1.0))
+                is_match = score >= config.sim_threshold
 
                 recog_diag.add_comparison(ref_name, float(score), is_match)
                 row_scores.append(score)
@@ -578,17 +592,21 @@ def cross_test(
                 else:
                     reporter.print_recognition_progress(row_label, ref_name, float(score), is_match)
 
+                # Create per-comparison test case for metrics computation
+                comp_dict = {
+                    "test_speaker": test_speaker,
+                    "ref_speaker": ref_name,
+                    "score": float(score),
+                    "vad_duration": vad_duration,
+                    "is_match": is_match,
+                    "row_label": f"{test_speaker}/{label} vs {ref_name}",
+                }
+                test_cases.append(comp_dict)
+
             metrics.end(f"recognize_{row_label}")
 
             test_case_dict = recog_diag.to_dict()
-            test_case_dict["row_label"] = row_label
-            test_case_dict["test_speaker"] = test_speaker
-            test_case_dict["ref_speaker"] = ref_name
-            test_case_dict["score"] = float(score)
-            test_case_dict["vad_duration"] = vad_duration
-            test_case_dict["is_match"] = is_match
-            test_cases.append(test_case_dict)
-
+            test_case_dict = recog_diag.to_dict()
             test_data_list.append(
                 {
                     "test_speaker": test_speaker,
@@ -623,7 +641,9 @@ def cross_test(
     reporter.print_test_summary(total_tests, passed_tests, errors)
 
     # 6. 计算实验指标
-    exp_metrics = ExperimentMetrics.from_results(test_cases, config.sim_threshold)
+    # 短音频阈值：启用 VAD 时 0.6s（VAD 裁掉静音后音频变短），禁用 VAD 时 1.5s（原始音频长度）
+    short_audio_duration = SHORT_AUDIO_DURATION_VAD if config.enable_vad else SHORT_AUDIO_DURATION_NO_VAD
+    exp_metrics = ExperimentMetrics.from_results(test_cases, config.sim_threshold, short_audio_duration)
 
     # 7. 生成图表和报告
     timestamp = datetime.now()
@@ -670,7 +690,51 @@ def cross_test(
     with open(results_path, "w", encoding="utf-8") as f:
         json.dump(report_data, f, indent=2, ensure_ascii=False)
 
-    # 生成 Markdown 摘要
+    # 计算总平均置信度
+    all_scores = [tc.get("score", 0.0) for tc in test_cases]
+    total_avg_confidence = float(np.mean(all_scores)) if all_scores else 0.0
+
+    # 计算同人平均置信度（正样本）
+    same_person_map = {
+        "John": {"John", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC"},
+        "John_MeetingRoom": {"John", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC"},
+        "John_D_USB": {"John", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC"},
+        "John_D_USB_AEC": {"John", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC"},
+        "Zhong": {"Zhong", "Zhong_D_USB"},
+        "Zhong_D_USB": {"Zhong", "Zhong_D_USB"},
+    }
+    genuine_scores = []
+    short_genuine_scores = []
+    for tc in test_cases:
+        ts = tc.get("test_speaker", "")
+        rs = tc.get("ref_speaker", "")
+        group = same_person_map.get(ts, {ts})
+        if rs in group:
+            score = tc.get("score", 0.0)
+            genuine_scores.append(score)
+            if tc.get("vad_duration", 0.0) < short_audio_duration:
+                short_genuine_scores.append(score)
+    genuine_avg_confidence = float(np.mean(genuine_scores)) if genuine_scores else 0.0
+    short_audio_genuine_confidence = float(np.mean(short_genuine_scores)) if short_genuine_scores else 0.0
+
+    # 写入 exp_metrics（确保保存到 experiment_log.json）
+    exp_metrics.total_avg_confidence = total_avg_confidence
+    exp_metrics.genuine_avg_confidence = genuine_avg_confidence
+    exp_metrics.short_audio_genuine_confidence = short_audio_genuine_confidence
+
+    # 打印指标
+    if config.verbose or True:
+        print(f"\n总平均置信度: {total_avg_confidence:.4f} ({len(all_scores)} 样本)")
+        print(f"同人平均置信度: {genuine_avg_confidence:.4f} ({len(genuine_scores)} 样本)")
+        print(f"短音频同人置信度: {short_audio_genuine_confidence:.4f} ({len(short_genuine_scores)} 样本)")
+
+    # 保存到 report_data
+    report_data["metrics_extended"] = {
+        "total_avg_confidence": total_avg_confidence,
+        "genuine_avg_confidence": genuine_avg_confidence,
+        "short_audio_genuine_confidence": short_audio_genuine_confidence,
+        "num_genuine_tests": len(genuine_scores),
+    }
     summary_path = experiment_dir / "summary.md"
     with open(summary_path, "w", encoding="utf-8") as f:
         f.write(f"# 实验 {experiment_id}\n\n")
@@ -680,9 +744,12 @@ def cross_test(
         f.write("## 指标\n\n")
         f.write(f"- **FAR**: {exp_metrics.far:.4f} ({exp_metrics.false_positives}/{exp_metrics.true_negatives + exp_metrics.false_positives})\n")
         f.write(f"- **FRR**: {exp_metrics.frr:.4f} ({exp_metrics.false_negatives}/{exp_metrics.true_positives + exp_metrics.false_negatives})\n")
-        f.write(f"- **短音频置信度**: {exp_metrics.short_audio_confidence:.4f} ({exp_metrics.short_audio_count} 样本)\n")
+        f.write(f"- **短音频置信度（全部）**: {exp_metrics.short_audio_confidence:.4f} ({exp_metrics.short_audio_count} 样本)\n")
+        f.write(f"- **短音频同人置信度**: {exp_metrics.short_audio_genuine_confidence:.4f}\n")
         f.write(f"- **总体准确率**: {exp_metrics.overall_accuracy:.4f}\n")
-        f.write(f"- **EER**: {exp_metrics.eer:.4f}\n\n")
+        f.write(f"- **EER**: {exp_metrics.eer:.4f}\n")
+        f.write(f"- **总平均置信度**: {total_avg_confidence:.4f}\n")
+        f.write(f"- **同人平均置信度**: {genuine_avg_confidence:.4f}\n\n")
         f.write(f"## 图表\n\n")
         f.write(f"- [热力图](heatmap.png)\n")
         f.write(f"- [柱状图](summary_bar.png)\n")
@@ -783,6 +850,7 @@ def main() -> None:
     print(f"FAR (误接受率):     {result.metrics.far:.4f}")
     print(f"FRR (误拒绝率):     {result.metrics.frr:.4f}")
     print(f"短音频置信度:       {result.metrics.short_audio_confidence:.4f}")
+    print(f"短音频同人置信度:   {result.metrics.short_audio_genuine_confidence:.4f}")
     print(f"总体准确率:         {result.metrics.overall_accuracy:.4f}")
     print(f"EER:                {result.metrics.eer:.4f}")
     print(f"\n详细结果: {EXPERIMENTS_DIR / experiment_id}")

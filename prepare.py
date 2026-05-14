@@ -48,6 +48,12 @@ SAMPLE_RATE = 16000
 MIN_AUDIO_DURATION = 0.3  # 最小音频时长（秒）
 MAX_AUDIO_DURATION = 60.0  # 最大音频时长（秒）
 
+# 短音频判定阈值
+# 启用 VAD 时：0.6s（VAD 会裁掉静音，有效音频更短）
+# 禁用 VAD 时：1.5s（原始音频长度，需包含短音频场景）
+SHORT_AUDIO_DURATION_VAD = 0.6
+SHORT_AUDIO_DURATION_NO_VAD = 1.5
+
 # 模型配置
 DEFAULT_MODEL_PATH = "pyannote/wespeaker-voxceleb-resnet34-LM"
 DEFAULT_DEVICE = "cpu"
@@ -72,13 +78,13 @@ SPEAKERS = {
         "register_dir": "asset/john/registration_segments",
         "test_segments_dir": "asset/john/test_segments",
     },
-    "John_USB": {
-        "register_dir": "asset/john_usb/registration_segments",
-        "test_segments_dir": "asset/john_usb/test_segments",
-    },
     "John_MeetingRoom": {
         "register_dir": "asset/john_metting_room/registration_segments",
         "test_segments_dir": "asset/john_metting_room/test_segments",
+    },
+    "John_D_USB": {
+        "register_dir": "asset/john_d_usb/registration_segments",
+        "test_segments_dir": "asset/john_d_usb/test_segments",
     },
     "John_D_USB_AEC": {
         "register_dir": "asset/john_d_usb_AEC/registration_segments",
@@ -108,18 +114,18 @@ SPEAKERS = {
 
 # 同一人组映射（用于评估）
 SAME_PERSON_GROUPS: dict[str, set[str]] = {
-    "John": {"John", "John_USB", "John_MeetingRoom", "John_D_USB_AEC"},
-    "John_USB": {"John", "John_USB", "John_MeetingRoom", "John_D_USB_AEC"},
-    "John_MeetingRoom": {"John", "John_USB", "John_MeetingRoom", "John_D_USB_AEC"},
-    "John_D_USB_AEC": {"John", "John_USB", "John_MeetingRoom", "John_D_USB_AEC"},
+    "John": {"John", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC"},
+    "John_MeetingRoom": {"John", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC"},
+    "John_D_USB": {"John", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC"},
+    "John_D_USB_AEC": {"John", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC"},
     "Zhong": {"Zhong", "Zhong_D_USB"},
     "Zhong_D_USB": {"Zhong", "Zhong_D_USB"},
 }
 
 SPEAKER_ORDER = [
     "John",
-    "John_USB",
     "John_MeetingRoom",
+    "John_D_USB",
     "John_D_USB_AEC",
     "Zhong",
     "Zhong_D_USB",
@@ -153,11 +159,16 @@ class ExperimentMetrics:
 
     far: float = 0.0  # False Accept Rate = false_accepts / total_negatives
     frr: float = 0.0  # False Reject Rate = false_rejects / total_positives
-    short_audio_confidence: float = 0.0  # < 0.6s 音频平均置信度
+    short_audio_confidence: float = 0.0  # 短音频平均置信度（所有样本）：VAD启用时<0.6s，禁用时<1.5s
+    short_audio_genuine_confidence: float = 0.0  # 短音频同人平均置信度
     overall_accuracy: float = 0.0  # (TP + TN) / total
     eer: float = 0.0  # Equal Error Rate
     avg_true_positive_score: float = 0.0  # 正确匹配平均分数
     avg_true_negative_score: float = 0.0  # 正确拒绝平均分数（越低越好）
+
+    # 总置信度（所有样本平均）
+    total_avg_confidence: float = 0.0
+    genuine_avg_confidence: float = 0.0  # 同人匹配平均置信度
 
     # 统计信息
     total_tests: int = 0
@@ -173,10 +184,13 @@ class ExperimentMetrics:
             "far": self.far,
             "frr": self.frr,
             "short_audio_confidence": self.short_audio_confidence,
+            "short_audio_genuine_confidence": self.short_audio_genuine_confidence,
             "overall_accuracy": self.overall_accuracy,
             "eer": self.eer,
             "avg_true_positive_score": self.avg_true_positive_score,
             "avg_true_negative_score": self.avg_true_negative_score,
+            "total_avg_confidence": self.total_avg_confidence,
+            "genuine_avg_confidence": self.genuine_avg_confidence,
             "total_tests": self.total_tests,
             "true_positives": self.true_positives,
             "true_negatives": self.true_negatives,
@@ -191,13 +205,20 @@ class ExperimentMetrics:
         return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
 
     @classmethod
-    def from_results(cls, results: list[dict], threshold: float) -> "ExperimentMetrics":
-        """从测试结果计算指标."""
+    def from_results(cls, results: list[dict], threshold: float, short_audio_duration: float = 0.6) -> "ExperimentMetrics":
+        """从测试结果计算指标.
+
+        Args:
+            results: 测试用例列表
+            threshold: 相似度阈值
+            short_audio_duration: 短音频判定阈值（秒），启用 VAD 默认 0.6，禁用 VAD 建议 1.5
+        """
         metrics = cls()
 
         total_positives = 0
         total_negatives = 0
         short_scores = []
+        short_genuine_scores = []
 
         for r in results:
             test_speaker = r.get("test_speaker", "")
@@ -209,9 +230,11 @@ class ExperimentMetrics:
             metrics.total_tests += 1
 
             # 收集短音频分数
-            if vad_duration < 0.6:
+            if vad_duration < short_audio_duration:
                 short_scores.append(score)
                 metrics.short_audio_count += 1
+                if is_same_person(test_speaker, ref_speaker):
+                    short_genuine_scores.append(score)
 
             # 判断是正样本还是负样本
             same_person = is_same_person(test_speaker, ref_speaker)
@@ -240,6 +263,8 @@ class ExperimentMetrics:
         # 短音频平均置信度
         if short_scores:
             metrics.short_audio_confidence = np.mean(short_scores)
+        if short_genuine_scores:
+            metrics.short_audio_genuine_confidence = np.mean(short_genuine_scores)
 
         # EER 简化估计（FAR 和 FRR 的平均值）
         metrics.eer = (metrics.far + metrics.frr) / 2

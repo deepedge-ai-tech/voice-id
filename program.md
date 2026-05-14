@@ -37,9 +37,14 @@
 |------|------|------|
 | `far` | False Accept Rate (误接受率) | ↓ 降低 |
 | `frr` | False Reject Rate (误拒绝率) | ↓ 降低 |
-| `short_audio_conf` | < 0.6s 音频平均置信度 | ↑ 提高 |
+| `short_audio_conf` | 短音频平均置信度（所有样本） | ↑ 提高 |
+| `short_audio_genuine_conf` | 短音频同人平均置信度 | ↑ 提高 |
 | `overall_accuracy` | 总体准确率 | ↑ 提高 |
 | `eer` | Equal Error Rate | ↓ 降低 |
+
+**短音频定义**（取决于 VAD 状态）：
+- VAD 启用时：< 0.6s（VAD 裁掉静音后音频变短）
+- VAD 禁用时：< 1.5s（原始音频长度，包含短音频场景）
 
 ## 快速开始
 
@@ -61,7 +66,7 @@ uv run training.py
 
 ### 推荐探索方向
 
-1. **短音频优化** (< 0.6s)
+1. **短音频优化**（VAD 禁用时 < 1.5s，VAD 启用时 < 0.6s）
    - 降低 `sim_threshold`（针对短音频，如 0.30-0.40）
    - 减小 `verify_window_secs` 到 0.3-0.5
    - 设置 `verify_crop_mode` 为 "head_window"
@@ -144,8 +149,8 @@ outputs/
 
 ## 成功标准
 
-- 必要条件：总平均置信度 > 0.7
-- 必要条件：短音频（< 0.6s）平均置信度 > 0.55
+- 必须达成：同人平均置信度 > 0.7
+- 必须达成：短音频（VAD启用<0.6s / VAD禁用<1.5s）同人平均置信度 > 0.55
 - FAR < 5%
 - FRR < 10%
 - EER < 8%
@@ -154,8 +159,8 @@ outputs/
 
 - 每个 SPEAKERS 配置组合测试时间约 5-10 分钟
 - 预计每小时可运行 6-12 次实验
-- 建议夜间运行，早上检查 `experiment_log.json`
 - 重点关注 `outputs/best_config.json` 的演变
+- 如果 同人平均置信度 没有达成则不要停止
 
 ---
 
