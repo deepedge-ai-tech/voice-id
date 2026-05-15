@@ -1,6 +1,6 @@
 [project]
 name = "wespeaker-deep-edge"
-version = "0.1.7"
+version = "0.1.8"
 description = "WeSpeaker 声纹识别工具 — 独立的声纹注册与识别 CLI 工具"
 readme = "README.md"
 license = "MIT"
@@ -26,8 +26,8 @@ dependencies = [
     "scipy>=1.0",
     "sounddevice>=0.4",
     "soundfile>=0.13.1",
-    "torch>=2.8.0",
-    "torchaudio>=2.8.0",
+    "torch==2.8.0",
+    "torchaudio==2.8.0",
 ]
 
 [project.urls]

@@ -33,12 +33,12 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# 创建并激活 venv
-python3 -m venv "$TEST_DIR/venv"
+# 创建并激活 venv（使用 uv + Python 3.10）
+uv venv --python 3.10 "$TEST_DIR/venv" --quiet 2>&1
 source "$TEST_DIR/venv/bin/activate"
 
 echo "📥 安装 whl..."
-pip install "$WHL" --quiet 2>&1
+uv pip install "$WHL" --quiet 2>&1
 
 echo ""
 echo "=== 测试 1: import + 默认模型路径 ==="

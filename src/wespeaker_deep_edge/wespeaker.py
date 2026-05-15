@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import math
+import os
 import pickle
 from dataclasses import dataclass, field
 from functools import lru_cache
@@ -184,6 +185,14 @@ def _load_model(model_path: str, device: str) -> torch.nn.Module:
     torch.load = _load  # type: ignore[assignment]
 
     dev = torch.device(device)
+
+    # 如果 model_path 是本地目录，指向具体的 .bin 文件
+    # （新版 huggingface_hub 不接受目录路径作为 repo_id）
+    if os.path.isdir(model_path):
+        bin_files = [f for f in os.listdir(model_path) if f.endswith(".bin")]
+        if bin_files:
+            model_path = os.path.join(model_path, bin_files[0])
+
     model = Model.from_pretrained(model_path)
     model.eval()
     model.to(dev)
