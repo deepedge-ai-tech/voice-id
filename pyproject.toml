@@ -1,6 +1,6 @@
 [project]
 name = "wespeaker-deep-edge"
-version = "0.1.6"
+version = "0.1.7"
 description = "WeSpeaker 声纹识别工具 — 独立的声纹注册与识别 CLI 工具"
 readme = "README.md"
 license = "MIT"
@@ -20,7 +20,7 @@ classifiers = [
 ]
 dependencies = [
     "audiomentations>=0.43.1",
-    "numpy>=1.22.0",
+    "numpy>=1.22.0,<2.0.0",
     "pyannote-audio>=3.3.2",
     "pydub>=0.25.0",
     "scipy>=1.0",
