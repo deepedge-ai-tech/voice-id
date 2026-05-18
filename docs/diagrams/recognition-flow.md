@@ -1,6 +1,6 @@
 # 识别流程详细图 (Detailed Recognition Flow)
 
-## 完整识别流程
+## 完整识别流程 — WespeakerDeep
 
 ```mermaid
 flowchart TD
@@ -11,16 +11,17 @@ flowchart TD
     classDef config fill:#e0e0e0,stroke:#616161,stroke-width:2px,stroke-dasharray: 5 5;
     classDef error fill:#ffebee,stroke:#d32f2f,stroke-width:2px;
     classDef compare fill:#f3e5f5,stroke:#7b1fa2,stroke-width:2px;
+    classDef deep fill:#e0f2f1,stroke:#00796b,stroke-width:2px;
 
-    Start([开始识别]):::input
+    Start([开始识别 Deep]):::input
     InputAudio[输入测试音频路径]:::input
     InputPk[参考声纹 .pkl 路径]:::input
 
-    Config[配置参数:<br/>sim_threshold: 0.55<br/>verify_crop_mode: full_utterance<br/>verify_buffer_keep_secs: 60.0<br/>enable_vad: False<br/>enable_score_compensation: False]:::config
+    Config[DeepConfig 参数:<br/>sim_threshold: 0.50<br/>verify_crop_mode: head_window<br/>verify_buffer_keep_secs: 60.0<br/>enable_vad: False<br/>enable_score_compensation: True<br/>score_compensation_mode: sqrt<br/>enable_multi_template: True]:::config
 
-    LoadModel[加载 ResNet34 模型<br/>pyannote.audio 3.1]:::process
+    LoadModel[加载 ResNet34 模型<br/>pyannote.audio 3.3+]:::process
 
-    LoadAudio[加载测试音频<br/>torchaudio.load]:::process
+    LoadAudio[加载测试音频<br/>torchaudio.load / soundfile]:::process
     CheckFormat{文件格式?}:::decision
     ConvertM4a[转换 M4A → WAV<br/>ffmpeg]:::process
     ConvertError[错误: 不支持的格式]:::error
@@ -29,74 +30,38 @@ flowchart TD
     ToMono[转为单声道<br/>waveform.mean]:::process
 
     GetDuration[获取音频时长]:::process
-    CheckDuration{时长检测}:::decision
-
-    RecordInfo[记录原始信息<br/>original_duration]:::process
+    CheckDuration{空/过短?}:::decision
+    AudioTooShort[返回错误<br/>audio too short]:::error
 
     ApplyVAD{enable_vad = True?}:::decision
-    VadProcess[Silero VAD 处理<br/>threshold: 0.5<br/>min_speech: 250ms<br/>window_size: 512]:::process
+    VadProcess[Silero VAD 处理<br/>threshold: 0.5<br/>min_speech: 250ms]:::process
     SkipVAD[跳过 VAD<br/>使用完整音频]:::process
-    VadDone[VAD 处理完成<br/>vad_duration]:::output
 
-    CheckCrop{verify_crop_mode}:::decision
-    CropFull[full_utterance<br/>使用完整音频]:::process
-    CropWindow[sliding_window<br/>滑动窗口]:::process
+    HeadWindow[head_window 裁剪<br/>保留头部 N 秒<br/>verify_window_secs]:::process
+    CropTail[tail 裁剪<br/>保留最后 N 秒<br/>默认不使用]:::process
 
     BufferCheck{时长 > buffer_keep?}:::decision
-    Truncate[截断到 buffer_keep_secs<br/>保留最后 N 秒]:::process
+    Truncate[截断到 buffer_keep_secs<br/>保留头部 60 秒]:::process
     NoTruncate[保留完整音频]:::process
 
-    CroppedAudio[裁剪后音频]:::output
-    RecordCrop[记录裁剪信息<br/>final_duration]:::process
+    IsShort{时长 < 1.5s?<br/>short_audio_max_duration}:::decision
+    SlidingWindow[滑动窗口<br/>window: 0.4s, hop: 0.15s<br/>提取多个 window embedding]:::deep
+    SingleEmb[单次 embedding 提取]:::process
 
-    LoadRefPkl[加载参考声纹 .pkl<br/>pickle.load]:::process
-    ValidatePkl{验证 pkl 格式}:::decision
-    PklError[错误: 无效的 .pkl 文件]:::error
+    LoadFullPkl[加载完整 .pkl<br/>load_full() → templates 列表]:::process
 
-    RefEmbedding[参考 Embedding<br/>256 维向量]:::output
-    CheckRefDim{维度 = 256?}:::decision
-    RefError[错误: Embedding 维度错误]:::error
+    MultiTemplate[多模板匹配<br/>对所有 (window × template) 组合<br/>取 max 余弦相似度]:::deep
+    SingleMatch[单模板匹配<br/>cosine(test, reference)]:::process
 
-    CalcRMS[计算 RMS 能量<br/>rms = sqrt(mean(x²))]:::process
-    RecordRMS[记录 rms_energy<br/>用于质量评估]:::process
+    ScoreComp["sqrt 分数补偿<br/>factor = (target/duration)^0.5<br/>comp = min(score × factor, 1.0)"]:::deep
 
-    ExtractTest[提取测试 Embedding]:::process
-    Preprocess[预处理<br/>归一化 [-1, 1]]:::process
-    ModelForward[模型前向传播<br/>ResNet34 → 256 维向量]:::process
-    TestNorm[L2 归一化<br/>||v|| = 1.0]:::process
-    TestEmbedding[测试 Embedding<br/>256 维向量]:::output
+    CompareThreshold{补偿后分数 >= 0.50?}:::decision
 
-    ComputeSim[计算余弦相似度<br/>cosine(ref, test)<br/>= dot(ref, test)]:::compare
-
-    ScoreCompensation{enable_score_compensation?}:::decision
-    GetVadDuration[获取 VAD 后时长<br/>vad_duration]:::process
-    CalcCompensation[计算补偿系数<br/>factor = target / vad_duration<br/>如果 vad < target]:::process
-    ApplyCompensation[应用补偿<br/>adjusted_score = score × factor]:::process
-    NoCompensation[使用原始分数]:::process
-
-    FinalScore[最终相似度分数<br/>confidence]:::output
-
-    CompareThreshold{分数 >= 阈值?}:::decision
-    ThresholdInfo[当前阈值: sim_threshold<br/>default: 0.55]:::config
-
-    IsRecognized[识别结果<br/>is_recognized = True]:::output
-    NotRecognized[识别结果<br/>is_recognized = False]:::output
-
-    CalcDiag[计算诊断信息]:::process
-    ThresholdDist[阈值距离<br/>distance = score - threshold]:::process
-    CalcDiff[与第二接近分数的差异<br/>top2_diff]:::process
-
-    QualityMetrics[质量指标]:::output
+    IsRecognized[识别成功<br/>is_recognized = True]:::output
+    NotRecognized[识别失败<br/>is_recognized = False]:::output
 
     BuildResult[构建返回结果]:::process
-    AddBasic[添加基本信息<br/>is_recognized, confidence]:::process
-    AddDiag[添加诊断信息<br/>threshold_distance, top2_diff]:::process
-    AddPrep[添加预处理信息<br/>duration, sample_rate, rms_energy]:::process
-
-    CheckResult{结果验证}:::decision
-
-    Success[识别成功<br/>返回完整结果]:::output
-    Fail[识别失败<br/>返回错误信息]:::error
+    Result["返回:<br/>is_recognized: bool<br/>confidence: float<br/>raw_confidence: float<br/>threshold: 0.50<br/>num_templates_used: int<br/>sliding_windows_used: int<br/>score_compensation_factor: float<br/>vad_duration: float"]:::output
 
     End([结束]):::output
 
@@ -105,13 +70,17 @@ flowchart TD
 
     Config -.->|参数| LoadModel
     Config -.->|参数| ApplyVAD
-    Config -.->|参数| CheckCrop
+    Config -.->|参数| HeadWindow
     Config -.->|参数| BufferCheck
+    Config -.->|参数| IsShort
+    Config -.->|参数| SlidingWindow
+    Config -.->|参数| MultiTemplate
+    Config -.->|参数| ScoreComp
     Config -.->|参数| CompareThreshold
-    Config -.->|参数| ScoreCompensation
 
     LoadModel --> LoadAudio
-    LoadModel --> ExtractTest
+    LoadModel --> SlidingWindow
+    LoadModel --> SingleEmb
 
     LoadAudio --> CheckFormat
     CheckFormat -->|WAV| Resample
@@ -122,86 +91,41 @@ flowchart TD
     Resample --> ToMono
     ToMono --> GetDuration
     GetDuration --> CheckDuration
-    CheckDuration -->|正常| RecordInfo
-    CheckDuration -->|空/过短| Fail
-    RecordInfo --> ApplyVAD
+    CheckDuration -->|正常| ApplyVAD
+    CheckDuration -->|空/过短| AudioTooShort
 
     ApplyVAD -->|True| VadProcess
     ApplyVAD -->|False| SkipVAD
+    VadProcess --> HeadWindow
+    SkipVAD --> HeadWindow
 
-    VadProcess --> VadDone
-    SkipVAD --> VadDone
-
-    VadDone --> CheckCrop
-    CheckCrop -->|full_utterance| CropFull
-    CheckCrop -->|sliding_window| CropWindow
-
-    CropFull --> BufferCheck
-    CropWindow --> BufferCheck
-
+    HeadWindow --> BufferCheck
     BufferCheck -->|> buffer_keep| Truncate
     BufferCheck -->|<= buffer_keep| NoTruncate
+    Truncate --> IsShort
+    NoTruncate --> IsShort
 
-    Truncate --> CroppedAudio
-    NoTruncate --> CroppedAudio
+    InputPk --> LoadFullPkl
+    LoadFullPkl --> IsShort
 
-    CroppedAudio --> RecordCrop
-    RecordCrop --> CalcRMS
+    IsShort -->|是 短音频| SlidingWindow
+    IsShort -->|否 长音频| SingleEmb
 
-    InputPk --> LoadRefPkl
-    LoadRefPkl --> ValidatePkl
-    ValidatePkl -->|有效| RefEmbedding
-    ValidatePkl -->|无效| PklError
+    SlidingWindow --> SlidingEmb[各窗口 embeddings]:::deep
+    SlidingEmb --> MultiTemplate
+    SingleEmb --> MultiTemplate
 
-    RefEmbedding --> CheckRefDim
-    CheckRefDim -->|256| ExtractTest
-    CheckRefDim -->|其他| RefError
+    MultiTemplate -->|raw_score| ScoreComp
+    ScoreComp -->|compensated_score| CompareThreshold
 
-    CalcRMS --> RecordRMS
-    RecordRMS --> ExtractTest
+    CompareThreshold -->|>= 0.50| IsRecognized
+    CompareThreshold -->|< 0.50| NotRecognized
 
-    ExtractTest --> Preprocess
-    Preprocess --> ModelForward
-    ModelForward --> TestNorm
-    TestNorm --> TestEmbedding
-
-    TestEmbedding --> ComputeSim
-    RefEmbedding --> ComputeSim
-
-    ComputeSim --> FinalScore
-
-    FinalScore --> ScoreCompensation
-    ScoreCompensation -->|True| GetVadDuration
-    ScoreCompensation -->|False| NoCompensation
-
-    GetVadDuration --> CalcCompensation
-    CalcCompensation --> ApplyCompensation
-    ApplyCompensation --> CompareThreshold
-    NoCompensation --> CompareThreshold
-
-    CompareThreshold -.->|参考| ThresholdInfo
-
-    CompareThreshold -->|>= threshold| IsRecognized
-    CompareThreshold -->|< threshold| NotRecognized
-
-    IsRecognized --> CalcDiag
-    NotRecognized --> CalcDiag
-
-    CalcDiag --> ThresholdDist
-    ThresholdDist --> CalcDiff
-    CalcDiff --> QualityMetrics
-
-    QualityMetrics --> BuildResult
-    BuildResult --> AddBasic
-    AddBasic --> AddDiag
-    AddDiag --> AddPrep
-    AddPrep --> CheckResult
-
-    CheckResult -->|有效| Success
-    CheckResult -->|无效| Fail
-
-    Success --> End
-    Fail --> End
+    IsRecognized --> BuildResult
+    NotRecognized --> BuildResult
+    BuildResult --> Result
+    Result --> End
+    AudioTooShort --> End
 ```
 
 ## 识别流程关键步骤
@@ -220,20 +144,28 @@ flowchart TD
 记录原始时长
 ```
 
-### 2. VAD 处理（可选）
+### 2. VAD 处理（可选，默认关闭）
 
 | 参数 | 值 | 说明 |
 |------|------|------|
 | threshold | 0.5 | VAD 置信度阈值 |
 | min_speech_duration_ms | 250 | 最小语音时长 |
 | min_silence_duration_ms | 100 | 最小静音时长 |
-| window_size_samples | 512 | 窗口大小 |
 
-**VAD 效果**：去除静音段，只保留有效语音片段
+**注意**: `enable_vad = False` 是默认且实验验证的最佳选择。完整音频得分高于 VAD 去静音后的音频。
 
 ### 3. 音频裁剪策略
 
-#### full_utterance（默认）
+#### head_window（当前最优，DeepConfig 默认）
+```
+完整音频 → 检查时长
+    ↓
+超过 buffer_keep_secs?
+    ↓ 是 → 保留头部 60 秒
+    ↓ 否 → 保留完整音频
+```
+
+#### 旧版 full_utterance（WespeakerBest 默认）
 ```
 完整音频 → 检查时长
     ↓
@@ -242,161 +174,104 @@ flowchart TD
     ↓ 否 → 保留完整音频
 ```
 
-#### sliding_window
-```
-音频 → 滑动窗口
-    ↓
-窗口大小: 2-5 秒
-    ↓
-重叠: 50%
-    ↓
-取最高分窗口
-```
-
-### 4. Embedding 提取
-
-```
-处理后的音频 (16kHz, mono)
-    ↓
-归一化 [-1, 1]
-    ↓
-ResNet34 前向传播
-    ↓
-256 维向量
-    ↓
-L2 归一化: ||v|| = 1.0
-```
-
-### 5. 相似度计算
+### 4. 多模板匹配（核心改进）
 
 ```python
-# 余弦相似度（L2 归一化后等于点积）
-score = dot(reference, test)
-     = sum(ref[i] * test[i] for i in range(256))
+# 加载所有模板
+full = load_full(pk_path)
+templates = [normalize(t) for t in full["templates"]]
 
-# 范围: [-1, 1]
-#   1.0  = 完全相同
-#   0.0  = 正交
-#  -1.0  = 完全相反
+# 多模板 max 匹配
+if enable_multi_template and num_templates > 1:
+    scores = [dot(test_emb, t) for t in templates]
+    raw_score = max(scores)
+else:
+    raw_score = dot(test_emb, reference)
 ```
 
-### 6. 分数补偿（可选）
+**效果**: 多模板保持每文件独立 embedding，测试时对所有 template 取 max 分数，显著降低误拒绝率。
 
-当启用 `enable_score_compensation` 时：
+### 5. 短音频滑动窗口（可选，默认关闭）
+
+短音频判定: `vad_duration < short_audio_max_duration (1.5s)`
 
 ```python
-if vad_duration < target_duration:
-    factor = target_duration / vad_duration
-    adjusted_score = score * factor
+if enable_sliding_window_test and is_short:
+    window_samples = int(0.4 * sample_rate)
+    hop_samples = int(0.15 * sample_rate)
+    for start in range(0, len - window + 1, hop):
+        window = pcm[start:start + window]
+        w_emb = extract_embedding(model, window)
+        # 对每个 window 做多模板匹配
+        for t in templates:
+            score = dot(w_emb, t)
+            best = max(best, score)
 ```
 
-**目的**：补偿短音频导致的分数偏低
+**默认关闭** (`enable_sliding_window_test = False`)，因为实验表明会推高 FAR。
+
+### 6. sqrt 分数补偿
+
+```python
+mode = "sqrt"
+target = 2.0  # score_compensation_target_duration
+effective_dur = max(duration, 0.3)
+factor = min((target / effective_dur) ** 0.5, 2.0)
+compensated_score = min(raw_score * factor, 1.0)
+```
+
+**效果**: 短音频（如 0.5s）→ factor ~2.0，大幅提分；长音频（>= 2s）→ factor ~1.0，基本不变。
 
 ### 7. 阈值判断
 
 | 阈值 | 值 | 说明 |
 |------|------|------|
-| sim_threshold | 0.55 | 默认识别阈值 |
-| 高安全 | 0.60-0.65 | 误接受率极低 |
-| 高召回 | 0.45-0.50 | 误拒绝率极低 |
+| **sim_threshold (DeepConfig)** | **0.50** | 18 轮实验验证的最优阈值 |
+| 高安全 | 0.55-0.60 | 误接受率极低 |
+| 高召回 | 0.40-0.45 | 误拒绝率极低 |
 
 ```
-score >= threshold?
+compensated_score >= 0.50?
     ↓ 是 → is_recognized = True
     ↓ 否 → is_recognized = False
 ```
 
-### 8. 诊断信息
-
-| 字段 | 计算方式 | 说明 |
-|------|----------|------|
-| confidence | cosine_sim | 相似度分数 |
-| threshold_distance | score - threshold | 与阈值的距离 |
-| top2_diff | score1 - score2 | 前两名分数差 |
-| duration | len(audio) / sr | 音频时长（秒） |
-| sample_rate | 16000 | 采样率 |
-| rms_energy | sqrt(mean(x²)) | RMS 能量 |
-
-### 9. 返回结果
+### 8. 返回结果
 
 ```python
 {
-    "is_recognized": bool,      # 是否识别成功
-    "confidence": float,        # 相似度分数 [0, 1]
-    "threshold": float,         # 使用的阈值
-    "threshold_distance": float,  # 与阈值的距离
-    "top2_diff": float,         # 前两名分数差
-    "preprocessing": {
-        "duration": float,      # 处理后时长
-        "sample_rate": int,     # 采样率
-        "rms_energy": float,    # RMS 能量
-        "original_duration": float,  # 原始时长
-        "vad_duration": float   # VAD 后时长
-    }
+    "is_recognized": bool,            # 是否识别成功
+    "confidence": float,              # 补偿后相似度 [0, 1]
+    "raw_confidence": float,          # 原始相似度（补偿前）
+    "threshold": 0.50,                # 使用的阈值
+    "vad_duration": float,            # VAD 后时长（秒）
+    "num_templates_used": int,        # 使用的模板数
+    "sliding_windows_used": int,      # 滑动窗口数（0 = 未启用）
+    "score_compensation_factor": float  # 分数补偿系数
 }
 ```
 
 ## 识别流程参数配置
 
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `sim_threshold` | 0.55 | 识别阈值 |
-| `verify_crop_mode` | "full_utterance" | 裁剪模式 |
-| `verify_buffer_keep_secs` | 60.0 | 最大保留时长 |
-| `enable_vad` | False | 启用 VAD |
-| `vad_threshold` | 0.5 | VAD 置信度 |
-| `enable_score_compensation` | False | 启用分数补偿 |
-| `score_compensation_target_duration` | 2.0 | 补偿目标时长 |
-
-## 识别决策流程
-
-```
-                    ┌─────────────────┐
-                    │  加载测试音频    │
-                    └────────┬────────┘
-                             │
-                    ┌────────▼────────┐
-                    │  预处理 & VAD   │
-                    └────────┬────────┘
-                             │
-                    ┌────────▼────────┐
-                    │  提取 Embedding │
-                    └────────┬────────┘
-                             │
-        ┌────────────────────┼────────────────────┐
-        │                    │                    │
-┌───────▼──────┐    ┌────────▼────────┐    ┌─────▼─────┐
-│ 加载参考声纹  │    │  计算相似度     │    │ 质量评估   │
-└───────┬──────┘    └────────┬────────┘    └─────┬─────┘
-        │                    │                    │
-        └────────────────────┼────────────────────┘
-                             │
-                    ┌────────▼────────┐
-                    │  分数补偿（可选）│
-                    └────────┬────────┘
-                             │
-                    ┌────────▼────────┐
-                    │  与阈值比较      │
-                    └────────┬────────┘
-                             │
-                ┌────────────┴────────────┐
-                │                         │
-         ┌──────▼──────┐          ┌──────▼──────┐
-         │ score >= 0.55 │          │ score < 0.55 │
-         └──────┬──────┘          └──────┬──────┘
-                │                         │
-         ┌──────▼──────┐          ┌──────▼──────┐
-         │ 识别成功      │          │ 识别失败     │
-         └─────────────┘          └─────────────┘
-```
+| 参数 | DeepConfig (当前最优) | BestConfig (旧版) |
+|------|---------------------|-------------------|
+| `sim_threshold` | **0.50** | 0.55 |
+| `verify_crop_mode` | **head_window** | full_utterance |
+| `verify_buffer_keep_secs` | 60.0 | 60.0 |
+| `enable_vad` | False | False |
+| `enable_score_compensation` | **True** | **False** |
+| `score_compensation_mode` | **sqrt** | (linear) |
+| `enable_multi_template` | **True** | False (不适用) |
+| `enable_sliding_window_test` | False | False |
+| `short_audio_max_duration` | 1.5s | N/A |
 
 ## 分数解释
 
 | 分数范围 | 含义 | 说明 |
 |---------|------|------|
 | 0.70 - 1.00 | 非常匹配 | 极有可能是同一人 |
-| 0.55 - 0.70 | 匹配 | 可能是同一人 |
-| 0.45 - 0.55 | 模糊区 | 不确定，需要更多信息 |
-| 0.30 - 0.45 | 不太匹配 | 可能不是同一人 |
+| 0.50 - 0.70 | 匹配 | 可能是同一人（阈值 0.50） |
+| 0.40 - 0.50 | 模糊区 | 不确定，需要更多信息 |
+| 0.30 - 0.40 | 不太匹配 | 可能不是同一人 |
 | 0.00 - 0.30 | 不匹配 | 极可能不是同一人 |
 | < 0.00 | 完全相反 | 不应该出现（检查错误） |

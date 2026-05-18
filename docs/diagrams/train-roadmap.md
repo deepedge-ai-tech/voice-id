@@ -1,5 +1,7 @@
 # 训练管线开发路线图 (Training Pipeline Roadmap)
 
+> 此图描述上游 WeSpeaker 训练框架。`wespeaker.*` 引用指向 upstream pip 包，非本地 `wespeaker_deep_edge` 推理模块。
+
 ```mermaid
 gantt
     title WeSpeaker 训练管线开发计划

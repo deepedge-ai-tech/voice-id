@@ -1,5 +1,7 @@
 # 训练技术栈图 (Training Tech Stack Diagram)
 
+> 此图描述上游 WeSpeaker 训练框架。`wespeaker.*` 引用指向 upstream pip 包，非本地 `wespeaker_deep_edge` 推理模块。
+
 ```mermaid
 graph TB
     classDef core fill:#e1f5fe,stroke:#0288d1,stroke-width:2px;

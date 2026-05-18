@@ -14,20 +14,20 @@ graph TB
     end
 
     subgraph 深度学习框架
-        Torch[PyTorch 2.x]:::backend
+        Torch[PyTorch 2.8.0 固定版本]:::backend
         TorchAudio[torchaudio 音频处理]:::backend
-        Pyannote[pyannote.audio ResNet34]:::backend
+        Pyannote[pyannote.audio 3.3+ ResNet34]:::backend
     end
 
     subgraph 音频处理
-        Librosa[librosa 音频加载]:::audio
-        Silero[silero-vad VAD 检测]:::audio
-        Augment[audiomentations 噪声增强]:::audio
+        SoundFile[soundfile 音频加载]:::audio
+        TorchAudioDep[torchaudio 加载/重采样]:::audio
+        Augment[audiomentations 噪声增强 可选]:::audio
     end
 
     subgraph 数据存储
-        Pkl[(Pickle 声纹存储)]:::infra
-        Model[(本地模型 models/)]:::infra
+        Pkl[(Pickle 声纹存储 dict格式)]:::infra
+        Model[(内置模型 _models/wespeaker/)]:::infra
     end
 
     subgraph 开发运维
@@ -42,8 +42,8 @@ graph TB
     Python --> Data
     Torch --> TorchAudio
     Torch --> Pyannote
-    Librosa --> TorchAudio
-    Silero --> Torch
+    SoundFile --> TorchAudioDep
+    TorchAudioDep --> Torch
     Augment --> Torch
     Pyannote --> Pkl
     Pyannote --> Model

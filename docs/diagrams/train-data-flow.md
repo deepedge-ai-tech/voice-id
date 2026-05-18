@@ -1,5 +1,7 @@
 # 训练数据流图 (Training Data Flow Diagram)
 
+> 此图描述上游 WeSpeaker 训练框架。`wespeaker.*` 引用指向 upstream pip 包，非本地 `wespeaker_deep_edge` 推理模块。
+
 ```mermaid
 flowchart LR
     classDef config fill:#e0e0e0,stroke:#616161,stroke-width:2px,stroke-dasharray: 5 5;

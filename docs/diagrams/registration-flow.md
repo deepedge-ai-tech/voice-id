@@ -1,6 +1,6 @@
 # 注册流程详细图 (Detailed Registration Flow)
 
-## 完整注册流程
+## 当前最优: WespeakerDeep 纯净注册流程
 
 ```mermaid
 flowchart TD
@@ -11,13 +11,110 @@ flowchart TD
     classDef config fill:#e0e0e0,stroke:#616161,stroke-width:2px,stroke-dasharray: 5 5;
     classDef error fill:#ffebee,stroke:#d32f2f,stroke-width:2px;
 
-    Start([开始注册]):::input
+    Start([开始注册 Deep]):::input
+    InputDir[输入注册目录 clean_dir]:::input
+    InputPk[输出 .pkl 路径]:::input
+
+    Config[DeepConfig 参数:<br/>enroll_skip_vad: True<br/>enroll_clean_only: True<br/>sample_rate: 16000]:::config
+
+    LoadModel[加载 ResNet34 模型<br/>pyannote.audio 3.3+]:::process
+
+    FindFiles[扫描目录<br/>glob *.wav]:::process
+    CheckFiles{找到 .wav 文件?}:::decision
+    NoFiles[错误: 无有效音频]:::error
+
+    LoadAudio[加载音频文件<br/>torchaudio.load / soundfile]:::process
+
+    SkipVAD[跳过 VAD 处理<br/>enroll_skip_vad=True]:::process
+
+    ExtractEmb[提取 Embedding<br/>_extract_embedding]:::process
+    Normalize[L2 归一化<br/>F.normalize(dim=0)]:::process
+
+    CollectEmb[收集所有 embeddings<br/>all_embeddings 列表]:::process
+
+    CheckEmb{有有效 embedding?}:::decision
+    NoEmb[错误: 无有效注册片段]:::error
+
+    CalcRef[计算 reference<br/>stack → mean → normalize]:::process
+
+    BuildPkl[构建 .pkl dict<br/>version: 1<br/>templates: [...N...]<br/>reference: [...]]:::process
+
+    SavePkl[保存到 .pkl 文件<br/>pickle.dump]:::process
+
+    Success[注册成功<br/>返回: {ok, num_segments,<br/>num_templates, pk_path}]:::output
+    End([结束]):::output
+
+    Start --> InputDir
+    Start --> InputPk
+    InputDir --> LoadModel
+    LoadModel --> FindFiles
+    FindFiles --> CheckFiles
+    CheckFiles -->|无文件| NoFiles
+    CheckFiles -->|有文件| LoadAudio
+    NoFiles --> End
+
+    Config -.->|参数| SkipVAD
+    Config -.->|参数| LoadAudio
+
+    LoadAudio --> SkipVAD
+    SkipVAD -->|每文件循环| ExtractEmb
+    ExtractEmb --> Normalize
+    Normalize --> CollectEmb
+    CollectEmb --> CheckEmb
+
+    CheckEmb -->|无| NoEmb
+    NoEmb --> End
+
+    CollectEmb --> CalcRef
+    CalcRef --> BuildPkl
+    BuildPkl --> SavePkl
+    SavePkl --> Success
+    Success --> End
+```
+
+### WespeakerDeep 注册流程说明
+
+1. **扫描注册目录** — 支持 `.wav` 格式，不含 VAD 和噪声增强
+2. **纯净注册** — 不对音频做任何增强或降质处理
+3. **跳过 VAD** — `enroll_skip_vad=True`，保留完整音频信息
+4. **逐文件处理** — 每个文件独立调用 `_load_audio()` → `_extract_embedding()` → L2 归一化
+5. **多模板保存** — 将所有文件 embedding 保存为 `templates` 列表
+6. **reference 计算** — templates 均值 + L2 归一化，用于向后兼容
+
+### .pkl 输出格式
+
+```python
+{
+    "version": 1,              # 格式版本
+    "templates": [              # 每个注册文件的独立 embedding
+        np.ndarray(256),        #   L2 归一化
+        np.ndarray(256),
+        ...
+    ],
+    "reference": np.ndarray(256)  # templates 均值 + L2 归一化
+}
+```
+
+---
+
+## 旧版: WespeakerBest 噪声增强注册（legacy）
+
+```mermaid
+flowchart TD
+    classDef input fill:#fce4ec,stroke:#c2185b,stroke-width:2px;
+    classDef process fill:#e1f5fe,stroke:#0288d1,stroke-width:2px;
+    classDef decision fill:#fff9c4,stroke:#f57f17,stroke-width:2px;
+    classDef output fill:#e8f5e9,stroke:#388e3c,stroke-width:2px;
+    classDef config fill:#e0e0e0,stroke:#616161,stroke-width:2px,stroke-dasharray: 5 5;
+    classDef error fill:#ffebee,stroke:#d32f2f,stroke-width:2px;
+
+    Start([开始注册 Best]):::input
     InputPath[输入音频路径]:::input
     InputPk[输出 .pkl 路径]:::input
 
-    Config[配置参数:<br/>sample_rate: 16000<br/>enable_vad: False<br/>noise_augment: True<br/>snr_levels: [20,15,10,5,0]]:::config
+    Config[BestConfig 参数:<br/>sample_rate: 16000<br/>enable_vad: False<br/>noise_augment: True<br/>snr_levels: [20,15,10,5,0]]:::config
 
-    LoadModel[加载 ResNet34 模型<br/>pyannote.audio 3.1]:::process
+    LoadModel[加载 ResNet34 模型<br/>pyannote.audio 3.3+]:::process
 
     LoadAudio[加载音频文件<br/>torchaudio.load]:::process
     CheckFormat{文件格式?}:::decision
@@ -69,11 +166,6 @@ flowchart TD
 
     CheckNaN{检查 NaN/Inf?}:::decision
     HandleNaN[处理 NaN<br/>替换为零向量]:::error
-
-    QualityCheck[质量评估]:::process
-    CalcCompactness[计算紧密度<br/>within_class_compactness]:::process
-    CalcDistance[计算余弦距离<br/>cosine_distances]:::process
-    QualityReport[生成质量报告]:::output
 
     SavePkl[保存到 .pkl 文件<br/>pickle.dump]:::process
     WriteMeta[写入元数据<br/>num_segments, snr_levels]:::process
@@ -144,28 +236,22 @@ flowchart TD
     FinalEmb --> CheckNaN
 
     CheckNaN -->|有 NaN| HandleNaN
-    CheckNaN -->|正常| QualityCheck
-    HandleNaN --> QualityCheck
-
-    QualityCheck --> CalcCompactness
-    CalcCompactness --> CalcDistance
-    CalcDistance --> QualityReport
-    QualityReport --> CheckQuality
-
-    CheckQuality -->|通过| SavePkl
-    CheckQuality -->|失败| Fail
+    CheckNaN -->|正常| SavePkl
+    HandleNaN --> SavePkl
 
     SavePkl --> WriteMeta
-    WriteMeta --> Success
+    WriteMeta --> CheckQuality
+
+    CheckQuality -->|通过| Success
+    CheckQuality -->|失败| Fail
 
     Success --> End
     Fail --> End
 ```
 
-## 注册流程关键步骤
+### WespeakerBest 旧版注册流程关键步骤
 
-### 1. 音频加载与预处理
-
+#### 1. 音频加载与预处理
 ```
 原始音频 (.wav/.m4a)
     ↓
@@ -178,7 +264,7 @@ flowchart TD
 按静音切分片段
 ```
 
-### 2. 片段过滤
+#### 2. 片段过滤
 
 | 条件 | 阈值 | 说明 |
 |------|------|------|
@@ -187,25 +273,21 @@ flowchart TD
 | 最小语音 | 250 ms | 单次语音最小时长 |
 | 最小静音 | 100 ms | 语音间隔判定 |
 
-### 3. 噪声增强
+#### 3. 噪声增强
 
 对每个有效片段，应用 5 个 SNR 级别的噪声注入：
-
 ```python
 for snr in [20, 15, 10, 5, 0]:  # dB
-    # 计算噪声缩放因子
     scale = 10 ** (-snr / 20)
-    # 混合
     augmented = original + noise * scale
 ```
 
-**效果**：
+**效果**:
 - 20 dB: 轻微噪声
 - 10 dB: 中等噪声
 - 0 dB: 强噪声
 
-### 4. Embedding 提取
-
+#### 4. Embedding 提取
 ```
 音频片段 (16kHz, mono)
     ↓
@@ -218,35 +300,26 @@ ResNet34 模型前向传播
 L2 归一化: ||v|| = 1.0
 ```
 
-### 5. 平均策略
+#### 5. 平均策略
 
-#### 简单平均
+**简单平均**:
 ```python
 final = sum(embeddings) / len(embeddings)
-final = final / ||final||  # L2 归一化
+final = final / ||final||
 ```
 
-#### SNR 加权平均
+**SNR 加权平均**:
 ```python
 weights = [10 ** (snr / 20) for snr in snr_levels]
 final = sum(e * w for e, w in zip(embeddings, weights))
 final = final / ||final||
 ```
 
-### 6. 质量评估
-
-| 指标 | 计算方式 | 说明 |
-|------|----------|------|
-| within_class_compactness | mean(cosine_distances) | 同类紧密度 |
-| fragment_variance | std(embeddings) | 片段方差 |
-| num_segments | len(fragments) × 5 | 有效片段数 |
-
-### 7. 输出格式
+#### 6. 旧版 .pkl 输出格式
 
 ```python
-# .pkl 文件内容
 {
-    "embedding": np.ndarray  # 256 维向量
+    "embedding": np.ndarray(256),  # 单一合成 embedding
     "metadata": {
         "num_fragments": int,
         "snr_levels": list[int],
@@ -256,13 +329,13 @@ final = final / ||final||
 }
 ```
 
-## 注册流程参数配置
+## 注册流程参数对比
 
-| 参数 | 默认值 | 说明 |
-|------|--------|------|
-| `sample_rate` | 16000 | 目标采样率 |
-| `vad_threshold` | 0.5 | VAD 置信度阈值 |
-| `min_segment_duration` | 1.0 | 最小片段时长（秒） |
-| `enable_noise_augment` | True | 启用噪声增强 |
-| `snr_levels` | [20,15,10,5,0] | SNR 级别列表 |
-| `avg_strategy` | "simple" | 平均策略 |
+| 参数 | WespeakerDeep (当前最优) | WespeakerBest (旧版) |
+|------|------------------------|---------------------|
+| `enroll_skip_vad` | True | False |
+| `enroll_clean_only` | True | False |
+| `noise_injection_snrs` | () 空 | (20, 15, 10, 5, 0) |
+| `sample_rate` | 16000 | 16000 |
+| 注册方式 | 每文件独立 embedding → 多模板 | VAD 切分 → 噪声增强 → 单一 embedding |
+| .pkl 格式 | dict{version, templates[], reference} | dict{embedding, metadata} |

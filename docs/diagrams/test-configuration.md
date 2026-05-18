@@ -67,3 +67,8 @@ graph TB
   - 低通滤波（700 Hz）去除高频
   - 产生沉闷、在水里说话的感觉
   - 轻微衰减（0.7x）模拟"被压制"
+
+## 使用的识别策略
+
+- **WespeakerDeep** (当前最优): `sim_threshold=0.50`, clean-only enroll, multi-template matching
+- **WespeakerClient** (基准): `sim_threshold=0.55`, noise-augmented enroll, single-template
