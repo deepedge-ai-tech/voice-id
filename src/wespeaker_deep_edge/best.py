@@ -50,6 +50,34 @@ from .wespeaker import (
     get_score_compensation_factor,
 )
 
+
+def _debug_save_test_audio(waveform: torch.Tensor, sample_rate: int, score: float) -> None:
+    """当 ENV_NAME == DEBUG 时，将测试音频保存到临时文件夹。
+
+    文件名: {当前日期时间}-{置信度}.wav
+
+    Args:
+        waveform: 音频波形（1D 或 2D tensor，值域 [-1, 1]）。
+        sample_rate: 采样率。
+        score: 识别置信度（用于文件名）。
+    """
+    if os.environ.get("ENV_NAME") != "DEBUG":
+        return
+    try:
+        import tempfile
+        from datetime import datetime
+
+        import torchaudio
+
+        dst_dir = Path(tempfile.gettempdir()) / "wespeaker_debug"
+        dst_dir.mkdir(parents=True, exist_ok=True)
+        dst = dst_dir / f"{datetime.now():%Y%m%d_%H%M%S_%f}-{score:.4f}.wav"
+        save_wav = waveform.unsqueeze(0) if waveform.ndim == 1 else waveform
+        torchaudio.save(str(dst), save_wav.cpu(), sample_rate)
+        logger.debug("测试音频已保存: %s", dst)
+    except Exception:
+        logger.warning("保存调试音频失败", exc_info=True)
+
 # --------------------------------------------------------------------------- #
 #  最佳配置
 # --------------------------------------------------------------------------- #
@@ -419,6 +447,8 @@ class WespeakerBest:
 
         threshold = self.config.sim_threshold
         logger.debug("Recognition score: %.4f (threshold: %.4f)", score, threshold)
+
+        _debug_save_test_audio(waveform, self._client.sample_rate, score)
 
         return {
             "is_recognized": score >= threshold,

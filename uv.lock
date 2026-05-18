@@ -4057,7 +4057,7 @@ wheels = [
 
 [[package]]
 name = "wespeaker-deep-edge"
-version = "0.1.7"
+version = "0.1.8"
 source = { editable = "." }
 dependencies = [
     { name = "audiomentations" },
@@ -4089,8 +4089,8 @@ requires-dist = [
     { name = "scipy", specifier = ">=1.0" },
     { name = "sounddevice", specifier = ">=0.4" },
     { name = "soundfile", specifier = ">=0.13.1" },
-    { name = "torch", specifier = ">=2.8.0" },
-    { name = "torchaudio", specifier = "==2.8" },
+    { name = "torch", specifier = "==2.8.0" },
+    { name = "torchaudio", specifier = "==2.8.0" },
 ]
 
 [package.metadata.requires-dev]
