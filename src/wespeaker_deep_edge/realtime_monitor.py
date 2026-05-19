@@ -9,7 +9,7 @@ in the terminal.
 Usage:
     uv run python -m wespeaker_deep_edge.realtime_monitor
     uv run python -m wespeaker_deep_edge.realtime_monitor --voiceprint asset/john/voice_best.pkl
-    uv run python -m wespeaker_deep_edge.realtime_monitor --window-secs 3.0 --threshold 0.50
+    uv run python -m wespeaker_deep_edge.realtime_monitor --window-secs 3.0 --step-secs 0.3
 """
 
 import argparse
@@ -43,7 +43,6 @@ class RingBuffer:
         self._total_written = 0
 
     def write(self, data: np.ndarray) -> None:
-        """Append audio samples. If buffer is full, oldest samples are overwritten."""
         n = len(data)
         if n == 0:
             return
@@ -61,9 +60,7 @@ class RingBuffer:
         self._total_written += n
 
     def read_last(self, n_samples: int) -> np.ndarray:
-        """Return the last n_samples written, in chronological order.
-        If fewer samples exist, return all available.
-        """
+        """Return the last n_samples written, in chronological order."""
         if self._total_written < n_samples:
             n_samples = self._total_written
         if n_samples == 0:
@@ -92,7 +89,7 @@ class AudioCapture:
 
     Args:
         buffer: RingBuffer instance to write audio into.
-        sample_rate: Target sample rate (must be 16000 for wespeaker).
+        sample_rate: Target sample rate (16000 for wespeaker).
         device: sounddevice device index. None = default input.
     """
 
@@ -114,14 +111,13 @@ class AudioCapture:
             samplerate=sample_rate,
             dtype="float32",
             callback=self._callback,
-            blocksize=1024,  # ~64ms blocks at 16kHz
+            blocksize=1024,
         )
 
     def _callback(self, indata: np.ndarray, frames: int, time_info, status) -> None:
-        """sounddevice callback — runs on audio thread."""
         if status:
-            pass  # status flags like overflow, underflow
-        self.buffer.write(indata[:, 0])  # mono
+            pass
+        self.buffer.write(indata[:, 0])
 
     def start(self) -> None:
         self._stream.start()
@@ -146,105 +142,73 @@ class AudioCapture:
 class RealtimeMonitor:
     """Main monitoring loop: sliding window + embedding + terminal display.
 
+    All voice processing uses WespeakerDeep with its default DeepConfig.
+
     Args:
-        voiceprint: Pre-loaded 256-dim reference embedding (torch.Tensor, L2-normalized).
-        model: pyannote audio model (torch.nn.Module).
-        device: inference device ("cpu" or "cuda").
+        deep: WespeakerDeep instance (uses default DeepConfig).
+        voiceprint_path: Path to .pkl voiceprint file.
         window_secs: sliding window duration in seconds.
         step_secs: step interval in seconds.
-        buffer_secs: ring buffer capacity in seconds.
-        threshold: cosine similarity threshold for "recognized".
-        rms_threshold: RMS energy threshold below which audio is considered silent.
-        sample_rate: audio sample rate.
     """
 
     def __init__(
         self,
-        voiceprint: "torch.Tensor",
-        model: "torch.nn.Module",
-        device: str = "cpu",
+        deep: WespeakerDeep,
+        voiceprint_path: str | Path,
         window_secs: float = 2.0,
         step_secs: float = 0.5,
-        buffer_secs: float = 60.0,
-        threshold: float = 0.70,
-        rms_threshold: float = 0.02,
-        sample_rate: int = 16000,
     ) -> None:
         import torch
 
-        self.voiceprint = voiceprint
-        self.model = model
-        self.device = device
-        self.window_secs = window_secs
-        self.step_secs = step_secs
-        self.buffer_secs = buffer_secs
-        self.threshold = threshold
-        self.rms_threshold = rms_threshold
-        self.sample_rate = sample_rate
+        self._deep = deep
+        self._window_secs = window_secs
+        self._step_secs = step_secs
+        self._sample_rate = deep.sample_rate
 
-        self._window_samples = int(window_secs * sample_rate)
-        capacity = int(buffer_secs * sample_rate)
+        # Load voiceprint via WespeakerDeep
+        vp_np = deep.load(voiceprint_path)
+        self._voiceprint = torch.from_numpy(vp_np)
+
+        self._window_samples = int(window_secs * self._sample_rate)
+        capacity = int(60.0 * self._sample_rate)
         self._buffer = RingBuffer(capacity)
 
         self._running = False
         self._window_count = 0
         self._start_time = 0.0
-        self._last_state = "init"
-
-    def _compute_rms(self, audio: np.ndarray) -> float:
-        """Compute RMS energy of audio segment."""
-        if len(audio) == 0:
-            return 0.0
-        return float(np.sqrt(np.mean(audio**2)))
 
     def _extract_score(self, audio: np.ndarray) -> float:
         """Extract embedding from audio and compute cosine similarity."""
         import torch
 
-        waveform = torch.from_numpy(audio).unsqueeze(0)  # (1, n)
-        emb = self.model.extract_embedding_from_pcm(waveform, self.sample_rate)
+        waveform = torch.from_numpy(audio).unsqueeze(0)
+        emb = self._deep._model.extract_embedding_from_pcm(waveform, self._sample_rate)
         if emb is None:
             return 0.0
-        return float(self.model.cosine_similarity(emb, self.voiceprint))
-
-    def _format_display(self, score: float | None, rms: float, elapsed: float) -> str:
-        """Format the terminal display line."""
-        duration = time.strftime("%H:%M:%S", time.gmtime(elapsed))
-
-        if score is None:
-            state = "silent"
-            line = f"\r[{duration}] ⚪ 静音 (RMS: {rms:.4f})     "
-        elif score >= self.threshold:
-            state = "speaking"
-            line = f"\r[{duration}] 🟢 John 说话中 (confidence: {score:.4f})     "
-        else:
-            state = "other"
-            line = f"\r[{duration}] 🔴 非 John 声音 (confidence: {score:.4f})     "
-
-        self._last_state = state
-        return line
+        return float(self._deep._model.cosine_similarity(emb, self._voiceprint))
 
     def run(self, device_index: int | None = None) -> None:
         """Start the monitoring loop. Blocks until KeyboardInterrupt."""
         import sounddevice as sd
 
+        threshold = self._deep.deep_config.sim_threshold
+
         print("=" * 60)
         print("  WeSpeaker 实时声纹监控")
         print("=" * 60)
-        print(
-            f"  设备: {sd.query_devices(device_index)['name'] if device_index is not None else 'Default Input'}"
+        device_name = (
+            sd.query_devices(device_index)["name"]
+            if device_index is not None
+            else "Default Input"
         )
-        print(f"  采样率: {self.sample_rate} Hz")
-        print(f"  窗口: {self.window_secs}s, 步长: {self.step_secs}s")
-        print(f"  阈值: {self.threshold}")
-        print(
-            f"  缓冲区: {int(self.sample_rate * self.buffer_secs)} 样本 ({self.buffer_secs:.0f}s ring buffer)"
-        )
+        print(f"  设备: {device_name}")
+        print(f"  窗口: {self._window_secs}s, 步长: {self._step_secs}s")
+        print(f"  阈值: {threshold} (DeepConfig)")
         print("=" * 60)
         print("  按 Ctrl+C 停止")
         print("=" * 60)
 
-        with AudioCapture(self._buffer, self.sample_rate, device_index):
+        with AudioCapture(self._buffer, self._sample_rate, device_index):
             self._running = True
             self._start_time = time.time()
             last_step_time = self._start_time
@@ -252,7 +216,7 @@ class RealtimeMonitor:
             try:
                 while self._running:
                     now = time.time()
-                    if now - last_step_time >= self.step_secs:
+                    if now - last_step_time >= self._step_secs:
                         last_step_time = now
 
                         available = self._buffer.available_samples
@@ -260,17 +224,18 @@ class RealtimeMonitor:
                             continue
 
                         audio = self._buffer.read_last(self._window_samples)
-                        rms = self._compute_rms(audio)
-
-                        if rms < self.rms_threshold:
-                            score = None
-                        else:
-                            score = self._extract_score(audio)
-                            self._window_count += 1
+                        score = self._extract_score(audio)
+                        self._window_count += 1
 
                         elapsed = now - self._start_time
-                        display = self._format_display(score, rms, elapsed)
-                        sys.stdout.write(display)
+                        duration = time.strftime("%H:%M:%S", time.gmtime(elapsed))
+
+                        if score >= threshold:
+                            line = f"\r[{duration}] 🟢 识别 (confidence: {score:.4f})     "
+                        else:
+                            line = f"\r[{duration}] 🔴 未识别 (confidence: {score:.4f})     "
+
+                        sys.stdout.write(line)
                         sys.stdout.flush()
 
             except KeyboardInterrupt:
@@ -287,8 +252,6 @@ class RealtimeMonitor:
 
 def main() -> None:
     """CLI entry point."""
-    import torch
-
     parser = argparse.ArgumentParser(description="WeSpeaker 实时声纹监控 — 麦克风实时识别")
     parser.add_argument(
         "--voiceprint",
@@ -296,13 +259,8 @@ def main() -> None:
         default="asset/john/voice_best.pkl",
         help="声纹 .pkl 文件路径 (默认: asset/john/voice_best.pkl)",
     )
-    parser.add_argument("--model-path", type=str, default="./models/wespeaker")
-    parser.add_argument("--device", type=str, default="cpu", choices=["cpu", "cuda"])
-    parser.add_argument("--window-secs", type=float, default=2.0)
-    parser.add_argument("--step-secs", type=float, default=0.5)
-    parser.add_argument("--buffer-secs", type=float, default=60.0)
-    parser.add_argument("--threshold", type=float, default=0.70)
-    parser.add_argument("--rms-threshold", type=float, default=0.02)
+    parser.add_argument("--window-secs", type=float, default=2.0, help="滑动窗口时长 (秒)")
+    parser.add_argument("--step-secs", type=float, default=0.5, help="步长 (秒)")
     list_group = parser.add_mutually_exclusive_group()
     list_group.add_argument("--list-devices", action="store_true", help="列出可用音频设备并退出")
     list_group.add_argument("--device-index", type=int, default=None, help="指定麦克风设备索引")
@@ -315,37 +273,19 @@ def main() -> None:
         print(sd.query_devices())
         return
 
-    # Validate voiceprint file
     vp_path = Path(args.voiceprint)
     if not vp_path.is_file():
         logger.error("声纹文件不存在: %s", vp_path)
-        logger.error(
-            "请先运行注册: uv run python scripts/best_recognition.py enroll "
-            "--clean asset/john/registration_segments/ "
-            "--noise asset/john/test_noise_segments/嘈杂环境测试.m4a "
-            "--output %s",
-            vp_path,
-        )
+        logger.error("请先注册声纹")
         sys.exit(1)
 
-    # Initialize model
-    client = WespeakerDeep(model_path=args.model_path, device=args.device)
-    # Enable VAD to filter non-speech — matches official_cross_test.py behavior
-    client._model.set_vad(True)
+    deep = WespeakerDeep()
 
-    # Load voiceprint
-    voiceprint = torch.from_numpy(client.load(vp_path))
-
-    # Start monitoring
     monitor = RealtimeMonitor(
-        voiceprint=voiceprint,
-        model=client._model,
-        device=args.device,
+        deep=deep,
+        voiceprint_path=vp_path,
         window_secs=args.window_secs,
         step_secs=args.step_secs,
-        buffer_secs=args.buffer_secs,
-        threshold=args.threshold,
-        rms_threshold=args.rms_threshold,
     )
 
     monitor.run(device_index=args.device_index)

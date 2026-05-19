@@ -22,13 +22,13 @@ dependencies = [
     "audiomentations>=0.43.1",
     "hdbscan>=0.8.40",
     "kaldiio",
-    "numpy>=1.22.0,<2.0.0",
+    "numpy==1.26.4",
     "pyannote-audio>=3.3.2",
     "pydub>=0.25.0",
-    "pyyaml",
+    "pyyaml==6.0.3",
     "scipy>=1.0",
     "silero-vad",
-    "sounddevice>=0.4",
+    "sounddevice==0.5.2",
     "soundfile>=0.13.1",
     "s3prl",
     "tqdm",
@@ -37,10 +37,12 @@ dependencies = [
     "umap-learn==0.5.6",
     # wespeaker 内置依赖（vendored _wespeaker/）
     "accelerate",
-    "onnxruntime>=1.16,<2.0",
+    "onnxruntime>=1.16.0,<2.0",
     "openai-whisper",
     "peft",
     "scikit-learn",
+    "seaborn>=0.13.2",
+    "matplotlib>=3.10.9",
 ]
 
 [project.urls]
