@@ -669,7 +669,7 @@ class WespeakerClient:
 
         logger.debug("Recognition score: %.4f (threshold=%.2f)", score, threshold)
 
-        _debug_save_test_audio(waveform, self.sample_rate, score)
+        saved_path = _debug_save_test_audio(waveform, self.sample_rate, score)
 
         return {
             "is_recognized": score >= threshold,
@@ -678,6 +678,7 @@ class WespeakerClient:
             "vad_duration": round(vad_duration, 2),
             "all_scores": [round(s, 4) for s in all_scores],
             "num_windows": len(all_scores),
+            "debug_audio": str(saved_path) if saved_path else None,
         }
 
     # ------------------------------------------------------------------ #
@@ -839,15 +840,15 @@ def _sliding_window_scores(
 # --------------------------------------------------------------------------- #
 
 
-def _debug_save_test_audio(waveform: torch.Tensor, sample_rate: int, score: float) -> None:
+def _debug_save_test_audio(
+    waveform: torch.Tensor, sample_rate: int, score: float
+) -> Path | None:
     """将每次识别的音频保存到临时文件夹 wespeaker_debug/。
 
     文件名: {当前日期时间}-{置信度}.wav
 
-    Args:
-        waveform: 音频波形（1D 或 2D tensor，值域 [-1, 1]）。
-        sample_rate: 采样率。
-        score: 识别置信度（用于文件名）。
+    Returns:
+        保存路径，失败返回 None。
     """
     try:
         import tempfile
@@ -861,9 +862,10 @@ def _debug_save_test_audio(waveform: torch.Tensor, sample_rate: int, score: floa
         save_wav = waveform.unsqueeze(0) if waveform.ndim == 1 else waveform
         torchaudio.save(str(dst), save_wav.cpu(), sample_rate)
         logger.info("[DEBUG] 测试音频已保存 → %s", dst)
-        logger.info("[DEBUG] 临时目录: %s", tempfile.gettempdir())
-    except Exception:
-        logger.warning("保存调试音频失败", exc_info=True)
+        return dst
+    except Exception as e:
+        logger.error("[DEBUG] 测试音频保存失败: %s", e, exc_info=True)
+        return None
 
 
 # --------------------------------------------------------------------------- #
@@ -941,7 +943,9 @@ def main() -> None:
             sliding_score_mode=args.sliding_score_mode,
         )
         r = client.recognize(args.audio, args.voiceprint)
-        logger.info("识别结果: %s", r)
+        logger.info("识别结果: %s", {k: v for k, v in r.items() if k != "debug_audio"})
+        if r.get("debug_audio"):
+            logger.info("[DEBUG] 音频已保存到: %s", r["debug_audio"])
     else:
         parser.print_help()
 
