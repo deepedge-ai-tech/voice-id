@@ -11,7 +11,8 @@ Output:
 """
 
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 import matplotlib
@@ -26,15 +27,13 @@ import wespeaker
 
 PEOPLE = ["john", "frank", "michael", "qingqing", "xixi", "zhong"]
 ASSET = Path("asset")
+ASSET_COMBINE = Path("asset_combine")
 OUTPUT_DIR = Path("scripts/output")
 
-REG_FILES = {
-    "john": "registration_segments/segment_002.wav",
-    "frank": "registration_segments/segment_02.wav",
-    "michael": "registration_segments/segment_002.wav",
-    "qingqing": "registration_segments/segment_002.wav",
-    "xixi": "registration_segments/segment_002.wav",
-    "zhong": "registration_segments/segment_002.wav",
+# Enrollment uses asset_combine/{Name}.wav (single full-duration file per person)
+# Test files use asset/{person}/test_segments/*.wav
+ENROLL_SOURCES: dict[str, Path] = {
+    p: ASSET_COMBINE / f"{p.capitalize()}.wav" for p in PEOPLE
 }
 
 TEST_DIRS: dict[str, str | None] = {
@@ -45,6 +44,9 @@ TEST_DIRS: dict[str, str | None] = {
     "xixi": "test_segments",
     "zhong": "test_segments",
 }
+
+# Modification notes — edit this before each run to document changes
+ENROLL_NOTES: str = "Enrollment: asset_combine/*.wav (single file per person)"
 
 NUM_MEL_BINS = 80
 FRAME_LENGTH = 25
@@ -288,8 +290,14 @@ def print_results(result: CrossTestResult) -> None:
         )
 
 
-def save_heatmaps(result: CrossTestResult, output_dir: Path = OUTPUT_DIR) -> None:
-    """Save per-file and aggregate similarity heatmaps to disk."""
+def save_heatmaps(
+    result: CrossTestResult, ts: str, output_dir: Path = OUTPUT_DIR
+) -> tuple[Path, Path]:
+    """Save per-file and aggregate similarity heatmaps to disk.
+
+    Returns:
+        (per_file_path, aggregate_path)
+    """
     active_people = sorted(result.per_file_results.keys())
     N = len(active_people)
     enroll_labels = [p.capitalize() for p in active_people]
@@ -331,9 +339,9 @@ def save_heatmaps(result: CrossTestResult, output_dir: Path = OUTPUT_DIR) -> Non
     plt.ylabel("Test File", fontsize=12)
     plt.tight_layout()
 
-    out_path = output_dir / "official_cross_test_per_file_heatmap.png"
-    plt.savefig(out_path, dpi=150)
-    print(f"\n  Per-file heatmap saved to: {out_path}")
+    per_file_path = output_dir / f"cross_test_per_file_{ts}.png"
+    plt.savefig(per_file_path, dpi=150)
+    print(f"\n  Per-file heatmap saved to: {per_file_path}")
     plt.close()
 
     # Aggregate heatmap
@@ -364,21 +372,116 @@ def save_heatmaps(result: CrossTestResult, output_dir: Path = OUTPUT_DIR) -> Non
     plt.ylabel("Test Speaker (avg)", fontsize=12)
     plt.tight_layout()
 
-    out_path = output_dir / "official_cross_test_heatmap.png"
-    plt.savefig(out_path, dpi=150)
-    print(f"  Aggregate heatmap saved to: {out_path}")
+    agg_path = output_dir / f"cross_test_aggregate_{ts}.png"
+    plt.savefig(agg_path, dpi=150)
+    print(f"  Aggregate heatmap saved to: {agg_path}")
     plt.close()
+
+    return per_file_path, agg_path
+
+
+# ── Report ────────────────────────────────────────────────────────────────────
+
+
+def save_report(
+    result: CrossTestResult,
+    ts: str,
+    per_file_img: Path,
+    agg_img: Path,
+    output_dir: Path = OUTPUT_DIR,
+) -> Path:
+    """Save a markdown report with modification notes and results table."""
+    active_people = sorted(result.per_file_results.keys())
+    N = len(active_people)
+    enroll_labels = [p.capitalize() for p in active_people]
+
+    lines = [
+        f"# Cross-Test Report — {ts}",
+        "",
+        f"**Enrollment source**: `asset_combine/` (single file per person)",
+        f"**Test source**: `asset/{{person}}/test_segments/`",
+        f"**Model**: vblinkf (VAD+ CMN={CMN} mel={NUM_MEL_BINS})",
+        "",
+        "## Modifications",
+        "",
+        ENROLL_NOTES,
+        "",
+        "## Summary",
+        "",
+        f"| Metric | Value |",
+        f"|--------|-------|",
+        f"| Same-person mean | {result.same_mean:.1f}% |",
+        f"| Different-person mean | {result.diff_mean:.1f}% |",
+        f"| Gap | {result.gap:.1f}% |",
+        "",
+        "## Per-Person",
+        "",
+        "| Person | Self | Other | Gap | Tests |",
+        "|--------|------|-------|-----|-------|",
+    ]
+
+    for i, p in enumerate(active_people):
+        n = len(result.per_file_results[p])
+        scores_self = [e[1][i] * 100 for e in result.per_file_results[p]]
+        scores_other = [
+            e[1][j] * 100
+            for e in result.per_file_results[p]
+            for j in range(N)
+            if j != i
+        ]
+        other_mean = np.mean(scores_other) if scores_other else 0.0
+        self_mean = np.mean(scores_self)
+        gap = self_mean - other_mean
+        lines.append(
+            f"| {p.capitalize()} | {self_mean:.1f}% | {other_mean:.1f}% | {gap:.1f}% | {n} |"
+        )
+
+    lines.extend(
+        [
+            "",
+            "## Per-File Details",
+            "",
+            f"Test Person | Test File | " + " | ".join(enroll_labels) + " |",
+            "|---|" + "---|" * (N + 1),
+        ]
+    )
+
+    for test_person in active_people:
+        for fname, scores in result.per_file_results[test_person]:
+            scores_str = " | ".join(f"{s * 100:.1f}%" for s in scores)
+            lines.append(f"{test_person} | {fname} | {scores_str}")
+
+    lines.extend(
+        [
+            "",
+            "## Heatmaps",
+            "",
+            f"![Per-file heatmap]({per_file_img.name})",
+            "",
+            f"![Aggregate heatmap]({agg_img.name})",
+            "",
+        ]
+    )
+
+    report_path = output_dir / f"cross_test_report_{ts}.md"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    report_path.write_text("\n".join(lines) + "\n")
+    print(f"\n  Report saved to: {report_path}")
+    return report_path
 
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 
 def main():
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+
     print("=" * 60)
     print(
         f"WeSpeaker Cross-Test: vblinkf VAD+ cmn={CMN}"
         f" mel={NUM_MEL_BINS} fl={FRAME_LENGTH} fs={FRAME_SHIFT}"
     )
+    print(f"  Enroll from: asset_combine/")
     print("=" * 60)
 
     # 1. Load model
@@ -392,7 +495,7 @@ def main():
     speakers: list[Speaker] = []
     test_files_map: dict[str, list[Path]] = {}
     for person in PEOPLE:
-        reg = ASSET / person / REG_FILES[person]
+        reg = ENROLL_SOURCES[person]
         if not reg.exists():
             print(f"  WARNING: {reg} not found, skipping {person}")
             continue
@@ -430,9 +533,12 @@ def main():
     print_results(result)
 
     # 5. Save heatmaps
-    save_heatmaps(result)
+    per_file_img, agg_img = save_heatmaps(result, ts)
 
-    # 6. Summary line
+    # 6. Save report
+    save_report(result, ts, per_file_img, agg_img)
+
+    # 7. Summary line
     print("\n" + "-" * 60)
     print(
         f"SUMMARY: Same={result.same_mean:.1f}%"
