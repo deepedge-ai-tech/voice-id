@@ -1,39 +1,19 @@
 #!/usr/bin/env python3
-"""声纹交叉测试 — 10x10 识别矩阵 (John 组, Xixi, Frank, Qingqing, Zhong 组)。
+"""声纹交叉测试 — WespeakerDeep 版本 (含 John_usb_yun)。
 
 测试场景:
-  注册: John, John_USB, John_MeetingRoom, John_D_USB, John_D_USB_AEC, Xixi, Frank, Qingqing, Zhong, Zhong_D_USB (使用 registration_segments 目录)
-  测试: 每人的 test_segments 目录中所有片段，每个片段单独测试
-  裁剪: 超过 2 秒的音频只保留前 2 秒
-
-说话人组:
-  - John 组: John, John_USB, John_MeetingRoom, John_D_USB, John_D_USB_AEC（同一人，不同录制条件/处理）
-  - Zhong 组: Zhong, Zhong_D_USB（同一人，不同录制条件）
-  - 其他: Xixi, Frank, Qingqing（独立说话人）
-
-预期:
-  - 正确匹配: John 组内相互匹配，Zhong 组内相互匹配，其他人只匹配自己 → 通过
-  - 正确拒绝: 不同人的测试片段 vs 其他人声纹 → 拒绝
-  - AEC 效果: John_D_USB_AEC 应能与其他 John 变体匹配（测试 AEC 处理对声纹的影响）
-
-图表排序:
-  - 横轴（注册声纹）按说话人组排序：John 组 → Zhong 组 → 其他
-  - 纵轴（测试音频）按说话人分组，每组内按 VAD 时长降序排序
+  注册: John, John_USB, John_MeetingRoom, John_D_USB, John_D_USB_AEC,
+        Xixi, Frank, Qingqing, Zhong, Zhong_D_USB, John_usb_yun
+  测试: 每人 test_segments 目录（没有则用 registration_segments）
 
 用法:
     uv run python scripts/cross_test.py
-    uv run python scripts/cross_test.py --noise asset/john/嘈杂环境测试.m4a
-    uv run python scripts/cross_test.py --snrs 20,15,10,5,0
     uv run python scripts/cross_test.py --threshold 0.50
-    uv run python scripts/cross_test.py --score-compensation  # 启用分数补偿
-    uv run python scripts/cross_test.py --score-compensation --target-duration 1.5
-    uv run python scripts/cross_test.py --output-dir outputs  # 生成图表和报告
-    uv run python scripts/cross_test.py --verbose  # 详细输出
-    uv run python scripts/cross_test.py --debug  # 调试信息
+    uv run python scripts/cross_test.py --output-dir outputs
+    uv run python scripts/cross_test.py --verbose
 """
 
 import logging
-import pickle
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -43,19 +23,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import matplotlib.pyplot as plt
 import numpy as np
 import torch
+import torchaudio
 
-from src.wespeaker import WespeakerBest
-from src.wespeaker.wespeaker import _apply_silero_vad, _crop_to_duration
-from src.wespeaker.diagnostics import (
-    PerformanceMetrics,
-    RecognitionDiagnostics,
-    RegistrationDiagnostics,
-)
-from src.wespeaker.reporters import (
-    JsonDataExporter,
-    MarkdownReportGenerator,
-    TerminalReporter,
-)
+from wespeaker_deep_edge.wespeaker_deep_dege import WespeakerDeep, DeepConfig
+from wespeaker_deep_edge.wespeaker import _apply_silero_vad, _crop_to_duration
 
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
 
