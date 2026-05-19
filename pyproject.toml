@@ -1,6 +1,6 @@
 [project]
 name = "wespeaker-deep-edge"
-version = "0.1.18"
+version = "0.1.19"
 description = "WeSpeaker 声纹识别工具 — 独立的声纹注册与识别 CLI 工具"
 readme = "README.md"
 license = "MIT"
@@ -20,14 +20,25 @@ classifiers = [
 ]
 dependencies = [
     "audiomentations>=0.43.1",
+    "hdbscan>=0.8.40",
+    "kaldiio",
     "numpy>=1.22.0,<2.0.0",
     "pyannote-audio>=3.3.2",
     "pydub>=0.25.0",
+    "pyyaml",
     "scipy>=1.0",
+    "silero-vad",
     "sounddevice>=0.4",
     "soundfile>=0.13.1",
+    "s3prl",
+    "tqdm",
     "torch==2.8.0",
     "torchaudio==2.8.0",
+    "umap-learn==0.5.6",
+    # wespeaker 内置依赖（vendored _wespeaker/）
+    "accelerate",
+    "openai-whisper",
+    "peft",
 ]
 
 [project.urls]
@@ -37,7 +48,7 @@ Repository = "https://github.com/yourusername/wespeaker-deep-edge"
 "Bug Tracker" = "https://github.com/yourusername/wespeaker-deep-edge/issues"
 
 [project.scripts]
-wespeaker-deep-edge = "wespeaker_deep_edge.wespeaker:main"
+wespeaker-deep-edge = "wespeaker_deep_edge.client:main"
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
@@ -50,6 +61,7 @@ where = ["src"]
 "wespeaker_deep_edge" = ["*.yaml", "*.yml", "*.json", "*.txt"]
 "wespeaker_deep_edge._models" = ["**/*"]
 "wespeaker_deep_edge._voiceprints" = ["**/*"]
+"wespeaker_deep_edge._wespeaker" = ["**/*"]
 
 [dependency-groups]
 dev = [

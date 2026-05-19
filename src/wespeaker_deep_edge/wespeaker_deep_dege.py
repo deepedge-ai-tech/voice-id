@@ -18,6 +18,14 @@
 
 from __future__ import annotations
 
+# 使用 vendored wespeaker（位于 _wespeaker/），确保可导入
+import sys
+from pathlib import Path
+
+_vendored = str(Path(__file__).parent / "_wespeaker")
+if _vendored not in sys.path:
+    sys.path.insert(0, _vendored)
+
 import logging
 import pickle
 from dataclasses import dataclass

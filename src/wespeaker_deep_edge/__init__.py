@@ -9,6 +9,14 @@
     logging.getLogger("wespeaker_deep_edge").addHandler(logging.StreamHandler())
 """
 
+import sys
+from pathlib import Path
+
+# vendored wespeaker 包（位于 _wespeaker/）
+_vendored = str(Path(__file__).parent / "_wespeaker")
+if _vendored not in sys.path:
+    sys.path.insert(0, _vendored)
+
 import logging
 
 # 库日志最佳实践：不加 handler，由使用方配置
