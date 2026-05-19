@@ -68,11 +68,19 @@ def main():
     for name, reg_dir in REG_SPEAKERS:
         pk_path = Path(f"/tmp/vp_{name}.pkl")
         print(f"  {name}: ", end="", flush=True)
-        result = deep.enroll(str(reg_dir), pk_path=str(pk_path))
+        # 拼接所有片段为单个音频后注册
+        from wespeaker_deep_edge.wespeaker import _load_audio
+        import torch, torchaudio
+        seg_files = sorted(reg_dir.glob("*.wav"))
+        concat_wav = torch.cat([_load_audio(str(f)) for f in seg_files])
+        tmp_wav = Path(f"/tmp/_vp_concat_{name}.wav")
+        torchaudio.save(str(tmp_wav), concat_wav.unsqueeze(0), 16000)
+        result = deep.enroll(str(tmp_wav), pk_path=str(pk_path))
+        tmp_wav.unlink(missing_ok=True)
         if not result["ok"]:
             raise RuntimeError(f"注册 {name} 失败: {result}")
         voiceprints[name] = pk_path
-        print(f"{result['num_templates']} templates ✅")
+        print(f"dim={result['embedding_dim']} ✅")
 
     reg_names = [name for name, _ in REG_SPEAKERS]
 

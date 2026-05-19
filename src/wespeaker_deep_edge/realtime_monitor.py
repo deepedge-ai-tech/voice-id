@@ -20,7 +20,6 @@ from pathlib import Path
 
 import numpy as np
 
-from .wespeaker import _extract_embedding
 from .wespeaker_deep_dege import WespeakerDeep
 
 logger = logging.getLogger(__name__)
@@ -204,8 +203,12 @@ class RealtimeMonitor:
         import torch.nn.functional as F
 
         waveform = torch.from_numpy(audio)
-        emb = F.normalize(_extract_embedding(self.model, waveform), dim=0)
-        return float(torch.dot(emb, self.voiceprint).clamp(-1.0, 1.0).item())
+        emb = self.model.extract_embedding_from_pcm(waveform, self.sample_rate)
+        if emb is None:
+            return 0.0
+        emb = F.normalize(emb, dim=0)
+        vp = F.normalize(self.voiceprint, dim=0)
+        return float(torch.dot(emb, vp).clamp(-1.0, 1.0).item())
 
     def _format_display(self, score: float | None, rms: float, elapsed: float) -> str:
         """Format the terminal display line."""
@@ -330,15 +333,14 @@ def main() -> None:
 
     # Initialize model
     client = WespeakerDeep(model_path=args.model_path, device=args.device)
-    client._client._ensure_model()
 
-    # Load voiceprint (handles both old array format and new dict format)
+    # Load voiceprint
     voiceprint = torch.from_numpy(client.load(vp_path))
 
     # Start monitoring
     monitor = RealtimeMonitor(
         voiceprint=voiceprint,
-        model=client._client._model,
+        model=client._model,
         device=args.device,
         window_secs=args.window_secs,
         step_secs=args.step_secs,

@@ -35,45 +35,47 @@ plt.rcParams["axes.unicode_minus"] = False
 #  测试配置
 # --------------------------------------------------------------------------- #
 
+ASSET_COMBINE = Path("asset_combine")
+
 SPEAKERS = {
     "John": {
-        "register": "asset/john/registration_segments/segment_002.wav",
+        "register": str(ASSET_COMBINE / "John.wav"),
         "test_dir": "asset/john/test_segments",
     },
     "John_USB": {
-        "register": "asset/john_usb/registration_segments/segment_002.wav",
+        "register": str(ASSET_COMBINE / "John.wav"),  # asset_combine has no variant files → use base
         "test_dir": "asset/john_usb/test_segments",
     },
     "John_MeetingRoom": {
-        "register": "asset/john_metting_room/registration_segments/segment_002.wav",
+        "register": str(ASSET_COMBINE / "John.wav"),
         "test_dir": "asset/john_metting_room/test_segments",
     },
     "John_D_USB": {
-        "register": "asset/john_d_usb/registration_segments/segment_002.wav",
+        "register": str(ASSET_COMBINE / "John.wav"),
         "test_dir": "asset/john_d_usb/test_segments",
     },
     "John_D_USB_AEC": {
-        "register": "asset/john_d_usb_AEC/registration_segments/segment_002.wav",
+        "register": str(ASSET_COMBINE / "John.wav"),
         "test_dir": "asset/john_d_usb_AEC/test_segments",
     },
     "Xixi": {
-        "register": "asset/xixi/registration_segments/segment_002.wav",
+        "register": str(ASSET_COMBINE / "Xixi.wav"),
         "test_dir": "asset/xixi/test_segments",
     },
     "Frank": {
-        "register": "asset/frank/registration_segments/segment_02.wav",
+        "register": str(ASSET_COMBINE / "Frank.wav"),
         "test_dir": "asset/frank/test_segments",
     },
     "Qingqing": {
-        "register": "asset/qingqing/registration_segments/segment_002.wav",
+        "register": str(ASSET_COMBINE / "Qingqing.wav"),
         "test_dir": "asset/qingqing/test_segments",
     },
     "Zhong": {
-        "register": "asset/zhong/registration_segments/segment_002.wav",
+        "register": str(ASSET_COMBINE / "Zhong.wav"),
         "test_dir": "asset/zhong/test_segments",
     },
     "Zhong_D_USB": {
-        "register": "asset/zhong_d_usb/registration_segments/segment_002.wav",
+        "register": str(ASSET_COMBINE / "Zhong.wav"),
         "test_dir": "asset/zhong_d_usb/test_segments",
     },
 }
@@ -204,6 +206,81 @@ def plot_summary_bar(
 
 
 # --------------------------------------------------------------------------- #
+#  注册 & 识别
+# --------------------------------------------------------------------------- #
+
+
+def enroll(
+    model,
+    enroll_files: dict[str, Path],
+    active_people: list[str],
+) -> dict[str, np.ndarray]:
+    """Extract enrollment embeddings, deduplicated by file path.
+
+    Returns:
+        Dict mapping speaker name to embedding vector.
+    """
+    enroll_embs: dict[str, np.ndarray] = {}
+    cache: dict[str, np.ndarray] = {}
+
+    for person in active_people:
+        path = str(enroll_files[person])
+        if path not in cache:
+            cache[path] = model.extract_embedding(path)
+        emb = cache[path]
+        if emb is None:
+            print(f"  WARNING: {person} 注册 VAD 过滤全部音频，跳过")
+            continue
+        enroll_embs[person] = emb
+        print(f"  注册 {person}: 完成")
+
+    return enroll_embs
+
+
+def recognize(
+    model,
+    test_files_map: dict[str, list[Path]],
+    enroll_embs: dict[str, np.ndarray],
+    active_people: list[str],
+) -> dict[str, list[tuple[str, list[float]]]]:
+    """Extract test embeddings and compute per-file similarity against all enrollments.
+
+    Returns:
+        Dict mapping test speaker to list of (filename, [scores]) tuples,
+        where scores[j] = similarity against enroll_embs[active_people[j]].
+    """
+    # 1. Extract test embeddings
+    test_embs: dict[str, list[np.ndarray]] = {}
+    for person in active_people:
+        embs = []
+        for f in test_files_map[person]:
+            e = model.extract_embedding(str(f))
+            if e is not None:
+                embs.append(e)
+        if not embs:
+            print(f"  WARNING: {person} 所有测试文件被 VAD 过滤")
+        test_embs[person] = embs
+        print(f"  测试 {person}: {len(embs)}/{len(test_files_map[person])} 有效")
+
+    # 2. Filter to people with valid test embeddings
+    valid = [p for p in active_people if p in test_embs and test_embs[p]]
+    if len(valid) < len(active_people):
+        dropped = set(active_people) - set(valid)
+        print(f"  以下说话人无有效测试 embedding，跳过: {dropped}")
+
+    # 3. Compute per-file similarity
+    per_file_results: dict[str, list[tuple[str, list[float]]]] = {}
+    for tp in valid:
+        entries = []
+        for fname, temb in zip(test_files_map[tp], test_embs[tp]):
+            scores = [cosine_similarity(temb, enroll_embs[ep]) for ep in valid]
+            entries.append((fname.name, scores))
+        per_file_results[tp] = entries
+
+    return per_file_results
+
+
+# --------------------------------------------------------------------------- #
 #  主流程
 # --------------------------------------------------------------------------- #
 
@@ -225,7 +302,7 @@ def cross_test(
 
     # 2. Collect files
     print("\n[2/4] 收集注册和测试文件...")
-    active_people = list(SPEAKERS.keys())
+    active_people: list[str] = []
     enroll_files: dict[str, Path] = {}
     test_files_map: dict[str, list[Path]] = {}
 
@@ -233,65 +310,31 @@ def cross_test(
         reg = Path(SPEAKERS[person]["register"])
         if not reg.exists():
             print(f"  WARNING: 注册文件不存在 {reg}，跳过 {person}")
-            active_people.remove(person)
             continue
-        enroll_files[person] = reg
-
         test_dir = Path(SPEAKERS[person]["test_dir"])
         tests = sorted(test_dir.glob("*.wav"))
         if not tests:
             print(f"  WARNING: 无测试文件 {test_dir}，跳过 {person}")
-            active_people.remove(person)
             continue
+        enroll_files[person] = reg
         test_files_map[person] = tests
+        active_people.append(person)
         print(f"  {person}: 注册={reg.name}, 测试文件={len(tests)}")
 
+    print(f"\n  活跃说话人 ({len(active_people)}): {active_people}")
+
+    # 3. Enroll
+    print("\n[3/4] 注册...")
+    enroll_embs = enroll(model, enroll_files, active_people)
+
+    # 4. Recognize (extract test embeddings + compute similarity)
+    active_people = [p for p in active_people if p in enroll_embs]
+    print(f"\n[4/4] 识别 ({len(active_people)} 人)...")
+    per_file_results = recognize(model, test_files_map, enroll_embs, active_people)
+    active_people = list(per_file_results.keys())
+
     N = len(active_people)
-    print(f"\n  活跃说话人 ({N}): {active_people}")
-
-    # 3. Extract embeddings
-    print(f"\n[3/4] 提取 embeddings...")
-    enroll_embs: dict[str, np.ndarray] = {}
-    test_embs: dict[str, list[np.ndarray]] = {}
-
-    for person in active_people:
-        # Enrollment
-        emb = model.extract_embedding(str(enroll_files[person]))
-        if emb is None:
-            print(f"  WARNING: {person} 注册 VAD 过滤全部音频，跳过")
-            active_people.remove(person)
-            continue
-        enroll_embs[person] = emb
-        print(f"  注册 {person}: 完成")
-
-        # Test files
-        embs = []
-        for f in test_files_map[person]:
-            e = model.extract_embedding(str(f))
-            if e is not None:
-                embs.append(e)
-        if not embs:
-            print(f"  WARNING: {person} 所有测试文件被 VAD 过滤，跳过")
-            # Can't remove from active_people mid-iteration, handle later
-        test_embs[person] = embs
-        print(f"  测试 {person}: {len(embs)}/{len(test_files_map[person])} 有效")
-
-    # Filter to people with both enroll and test embeddings
-    active_people = [p for p in active_people if p in enroll_embs and p in test_embs and test_embs[p]]
-    N = len(active_people)
-    print(f"\n  最终有效说话人 ({N}): {active_people}")
-
-    # 4. Compute similarity matrix
-    print(f"\n[4/4] 计算相似度矩阵...")
-
-    # Per-file results
-    per_file_results: dict[str, list[tuple[str, list[float]]]] = {}
-    for tp in active_people:
-        entries = []
-        for fname, temb in zip(test_files_map[tp], test_embs[tp]):
-            scores = [cosine_similarity(temb, enroll_embs[ep]) for ep in active_people]
-            entries.append((fname.name, scores))
-        per_file_results[tp] = entries
+    col_labels = active_people
 
     # Aggregate matrix
     sim_matrix = np.zeros((N, N), dtype=np.float32)

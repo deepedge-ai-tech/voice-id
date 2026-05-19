@@ -253,14 +253,10 @@ def cross_test_deep(
     deep_config = DeepConfig(sim_threshold=threshold)
     recognizer = WespeakerDeep(config=deep_config)
 
-    metrics.start("model_load")
-    recognizer._client._ensure_model()
-    metrics.end("model_load")
-
     if verbose:
         print(f"\n模型已加载，阈值 = {threshold}")
 
-    # 2. 注册所有说话人（每文件独立 template）
+    # 2. 注册所有说话人（拼接所有片段为单个音频后注册）
     voiceprints: dict[str, torch.Tensor] = {}
     registration_data: dict[str, dict] = {}
 
@@ -278,16 +274,24 @@ def cross_test_deep(
             print(f"警告: {name} 的注册目录中没有音频文件")
             continue
 
-        # 直接传注册目录，保留每文件独立 embedding（多模板）
-        speaker_pk = Path(f"/tmp/voice_deep_{name}.pkl")
-        result = recognizer.enroll(str(reg_dir), pk_path=str(speaker_pk))
+        # 拼接所有注册片段为单个音频 → 注册
+        from wespeaker_deep_edge.wespeaker import _load_audio
+        import torch as _torch
 
-        voiceprints[name] = torch.from_numpy(
-            np.asarray(result["reference"], dtype=np.float32)
+        concat_wav = _torch.cat([_load_audio(str(f)) for f in segment_files])
+        tmp_concat = Path("/tmp") / f"_voice_deep_concat_{name}.wav"
+        import torchaudio
+        torchaudio.save(str(tmp_concat), concat_wav.unsqueeze(0), 16000)
+
+        speaker_pk = Path(f"/tmp/voice_deep_{name}.pkl")
+        result = recognizer.enroll(str(tmp_concat), pk_path=str(speaker_pk))
+
+        voiceprints[name] = _torch.from_numpy(
+            np.asarray(result.get("embedding", recognizer.load(str(speaker_pk))), dtype=np.float32)
         )
 
         if verbose:
-            print(f"  {result['num_segments']} files → {result['num_templates']} templates")
+            print(f"  {len(segment_files)} files → 1 embedding (dim={result['embedding_dim']})")
 
         reg_diag.add_segment("deep_enroll", 0, 16000, voiceprints[name])
         metrics.end(f"registration_{name}")

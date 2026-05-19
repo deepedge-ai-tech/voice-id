@@ -71,8 +71,6 @@ from wespeaker_deep_edge.wespeaker_deep_dege import WespeakerDeep
 print('正在初始化 WespeakerDeep...')
 deep = WespeakerDeep()
 print(f'✅ deep_config.sim_threshold = {deep.deep_config.sim_threshold}')
-print(f'✅ deep_config.enable_multi_template = {deep.deep_config.enable_multi_template}')
-print(f'✅ deep_config.enroll_clean_only = {deep.deep_config.enroll_clean_only}')
 "
 
 echo ""
@@ -105,21 +103,18 @@ deep = WespeakerDeep()
 sr = 16000
 
 with tempfile.TemporaryDirectory() as tmpdir:
-    reg_dir = Path(tmpdir) / 'reg'
-    reg_dir.mkdir()
     pk_path = Path(tmpdir) / 'voice.pkl'
     test_path = Path(tmpdir) / 'test.wav'
 
-    # 生成 3 个注册片段（1s 不同频率正弦波）
-    for i in range(3):
-        t = np.arange(sr, dtype=np.float32) / sr
-        tone = (0.5 * np.sin(2 * np.pi * (200 + i * 100) * t)).astype(np.float32)
-        sf.write(str(reg_dir / f'seg_{i}.wav'), tone, sr)
+    # 生成 3s 注册音频（不同频率正弦波）
+    t = np.arange(sr * 3, dtype=np.float32) / sr
+    tone = (0.5 * np.sin(2 * np.pi * 300 * t)).astype(np.float32)
+    sf.write(str(tmpdir / 'enroll.wav'), tone, sr)
 
     # 注册
-    result = deep.enroll(str(reg_dir), pk_path=str(pk_path))
+    result = deep.enroll(str(tmpdir / 'enroll.wav'), pk_path=str(pk_path))
     assert result['ok'], f'注册失败: {result}'
-    print(f'✅ 注册成功: {result[\"num_segments\"]} segments → {result[\"num_templates\"]} templates')
+    print(f'✅ 注册成功: dim={result[\"embedding_dim\"]}')
 
     # 生成测试音频（同频率，应高置信度）
     t = np.arange(sr, dtype=np.float32) / sr
@@ -129,8 +124,7 @@ with tempfile.TemporaryDirectory() as tmpdir:
     # 识别
     result = deep.recognize(str(test_path), str(pk_path))
     print(f'✅ 识别结果: confidence={result[\"confidence\"]:.4f}, '
-          f'is_recognized={result[\"is_recognized\"]}, '
-          f'templates={result[\"num_templates_used\"]}')
+          f'is_recognized={result[\"is_recognized\"]}')
 "
 
 if $BATCH_MODE; then
@@ -140,6 +134,8 @@ ASSET_DIR="$ASSET_DIR" python -c "
 import sys, os, json
 from pathlib import Path
 from wespeaker_deep_edge.wespeaker_deep_dege import WespeakerDeep
+import torch, torchaudio
+from wespeaker_deep_edge.wespeaker import _load_audio
 
 asset_dir = Path(os.environ['ASSET_DIR'])
 reg_dir = asset_dir / 'registration_segments'
@@ -148,20 +144,24 @@ pk_path = Path('/tmp/voice_john_batch.pkl')
 
 deep = WespeakerDeep()
 
-# 注册
+# 注册（拼接所有片段为单个音频）
 print(f'注册目录: {reg_dir}')
 reg_files = sorted(reg_dir.glob('*.wav'))
 print(f'注册片段: {len(reg_files)} 个')
-result = deep.enroll(str(reg_dir), pk_path=str(pk_path))
+concat_wav = torch.cat([_load_audio(str(f)) for f in reg_files])
+tmp_concat = Path('/tmp/_whl_concat_enroll.wav')
+torchaudio.save(str(tmp_concat), concat_wav.unsqueeze(0), 16000)
+result = deep.enroll(str(tmp_concat), pk_path=str(pk_path))
+tmp_concat.unlink(missing_ok=True)
 assert result['ok'], f'注册失败: {result}'
-print(f'✅ 注册完成: {result[\"num_templates\"]} templates, dim={result[\"embedding_dim\"]}')
+print(f'✅ 注册完成: dim={result[\"embedding_dim\"]}')
 
 # 批量测试
 test_files = sorted(test_dir.glob('*.wav'))
 print(f'\n测试文件: {len(test_files)} 个')
 print('-' * 60)
-print(f'{\"文件\":>30s} | {\"置信度\":>8s} | {\"判定\":>6s} | {\"模板\":>4s}')
-print('-' * 60)
+print(f'{\"文件\":>30s} | {\"置信度\":>8s} | {\"判定\":>6s}')
+print('-' * 56)
 
 passed = 0
 failed = 0
@@ -172,7 +172,7 @@ for tf in test_files:
         passed += 1
     else:
         failed += 1
-    print(f'{tf.name:>30s} | {result[\"confidence\"]:>8.4f} | {status:>6s} | {result[\"num_templates_used\"]:>4d}')
+    print(f'{tf.name:>30s} | {result[\"confidence\"]:>8.4f} | {status:>6s}')
 
 print('-' * 60)
 total = len(test_files)
