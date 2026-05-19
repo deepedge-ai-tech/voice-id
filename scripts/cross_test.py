@@ -24,6 +24,7 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
+import wespeaker_deep_edge  # 将 vendored _wespeaker/ 加入 sys.path
 import wespeaker
 
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
@@ -58,6 +59,14 @@ SPEAKERS = {
         "register": str(ASSET_COMBINE / "John.wav"),
         "test_dir": "asset/john_d_usb_AEC/test_segments",
     },
+    "John_RealTime": {
+        "register": str(ASSET_COMBINE / "John.wav"),
+        "test_dir": "asset/john_real_time/test_segments",
+    },
+    "Michael": {
+        "register": str(ASSET_COMBINE / "Michael.wav"),
+        "test_dir": "asset/michael/registration_segments",
+    },
     "Xixi": {
         "register": str(ASSET_COMBINE / "Xixi.wav"),
         "test_dir": "asset/xixi/test_segments",
@@ -87,6 +96,8 @@ SPEAKER_ORDER = [
     "John_MeetingRoom",
     "John_D_USB",
     "John_D_USB_AEC",
+    "John_RealTime",
+    "Michael",
     "Zhong",
     "Zhong_D_USB",
     "Xixi",
@@ -96,11 +107,13 @@ SPEAKER_ORDER = [
 
 # Same-person groups
 SAME_PERSON_GROUPS: dict[str, set[str]] = {
-    "John": {"John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC"},
-    "John_USB": {"John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC"},
-    "John_MeetingRoom": {"John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC"},
-    "John_D_USB": {"John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC"},
-    "John_D_USB_AEC": {"John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC"},
+    "John": {"John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC", "John_RealTime"},
+    "John_USB": {"John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC", "John_RealTime"},
+    "John_MeetingRoom": {"John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC", "John_RealTime"},
+    "John_D_USB": {"John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC", "John_RealTime"},
+    "John_D_USB_AEC": {"John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC", "John_RealTime"},
+    "John_RealTime": {"John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC", "John_RealTime"},
+    "Michael": {"Michael"},
     "Zhong": {"Zhong", "Zhong_D_USB"},
     "Zhong_D_USB": {"Zhong", "Zhong_D_USB"},
 }
