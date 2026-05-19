@@ -82,7 +82,13 @@ bash scripts/test_whl_isolated.sh [asset_dir]
 # 注册声纹
 uv run python -m wespeaker_deep_edge.wespeaker enroll audio.wav voice.pkl
 
-# 识别声纹
+# 识别声纹（不传 voiceprint 默认用内置 John 声纹）
+uv run python -m wespeaker_deep_edge.wespeaker recognize audio.wav
+
+# 识别声纹（指定内置声纹 index）
+uv run python -m wespeaker_deep_edge.wespeaker recognize audio.wav --package-pk-index 1  # Frank
+
+# 识别声纹（指定外部文件）
 uv run python -m wespeaker_deep_edge.wespeaker recognize audio.wav voice.pkl
 
 # 切分注册音频
@@ -124,12 +130,40 @@ uv run python -m wespeaker.realtime_monitor --list-devices
 **注册流程**: 纯净注册 → 每文件独立 embedding → 多模板保存
 **识别流程**: 多模板 max 匹配 → sqrt 分数补偿 → 短音频自动提分
 
+## 调试音频自动保存
+
+每次 `recognize()` 调用时，输入的音频会自动保存到系统临时目录的 `wespeaker_debug/` 文件夹：
+
+```bash
+# 查看保存位置
+ls $(python3 -c "import tempfile; print(tempfile.gettempdir())")/wespeaker_debug/
+```
+
+文件名格式: `{日期时间}-{置信度}.wav`，无需任何环境变量。
+
+## 内置声纹
+
+6 人声纹已打包进 whl（`_voiceprints/`），CLI/Python API 均可使用。
+
+| Index | Name     |
+|-------|----------|
+| 0     | John     |
+| 1     | Frank    |
+| 2     | Michael  |
+| 3     | Qingqing |
+| 4     | Xixi     |
+| 5     | Zhong    |
+
+- CLI: `--package-pk-index <index>` 选择内置声纹，不传 `voiceprint` 时默认 John (index 0)
+- Python API: 设置 `client.package_pk_index` 或 `recognize()` 不传 `pk_path`
+- `package_pk_index` 优先级高于 `pk_path`
+
 ## 核心 API
 
 | 方法 | 说明 |
 |------|------|
 | `WespeakerClient().enroll(audio_path, pk_path)` | 注册声纹，提取 embedding 并保存到 .pkl |
-| `WespeakerClient().recognize(audio_path, pk_path)` | 比对音频与参考声纹，返回识别结果和置信度 |
+| `WespeakerClient().recognize(audio_path, pk_path=None)` | 比对音频与参考声纹，返回识别结果和置信度。**pk_path=None 时使用内置声纹**。调试音频自动保存 |
 
 ## 强制检查清单
 

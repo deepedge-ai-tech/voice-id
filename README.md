@@ -28,16 +28,39 @@ uv pip install .
 
 ```bash
 # 注册声纹
-wespeaker enroll voice.mp3 voice.pkl
+wespeaker-deep-edge enroll voice.mp3 voice.pkl
 
-# 识别声纹
-wespeaker recognize test.mp3 voice.pkl
+# 识别声纹（使用内置 John 声纹，无需传 voiceprint）
+wespeaker-deep-edge recognize test.mp3
+
+# 指定内置声纹（按 index）
+wespeaker-deep-edge recognize test.mp3 --package-pk-index 1   # Frank
+wespeaker-deep-edge recognize test.mp3 --package-pk-index 3   # Qingqing
+
+# 指定外部声纹文件
+wespeaker-deep-edge recognize test.mp3 voice.pkl
+
+# 同时传入 voiceprint 和 --package-pk-index：优先使用内置声纹
+wespeaker-deep-edge recognize test.mp3 voice.pkl --package-pk-index 2   # Michael
 ```
+
+### 内置声纹索引
+
+| Index | Name     |
+|-------|----------|
+| 0     | John     |
+| 1     | Frank    |
+| 2     | Michael  |
+| 3     | Qingqing |
+| 4     | Xixi     |
+| 5     | Zhong    |
+
+> 不传 `voiceprint` 参数时，默认使用 John (index 0) 的声纹。
 
 ### Python API 使用
 
 ```python
-from wespeaker import WespeakerClient
+from wespeaker_deep_edge import WespeakerClient
 
 # 初始化客户端
 client = WespeakerClient()
@@ -45,7 +68,14 @@ client = WespeakerClient()
 # 注册声纹
 client.mp3_to_pk("voice.mp3", "voice.pkl")
 
-# 识别声纹
+# 识别声纹（使用内置 John 声纹）
+result = client.recognize("test.mp3")  # pk_path 默认 None
+
+# 使用内置声纹（按 index）
+client.package_pk_index = 1  # Frank
+result = client.recognize("test.mp3")
+
+# 指定外部声纹文件
 result = client.recognize("test.mp3", "voice.pkl")
 print(f"识别结果: {result}")
 ```

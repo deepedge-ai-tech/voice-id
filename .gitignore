@@ -14,6 +14,7 @@ models/
 
 # Pickle files
 *.pkl
+!src/wespeaker_deep_edge/_voiceprints/*.pkl
 
 # Audio files
 *.wav

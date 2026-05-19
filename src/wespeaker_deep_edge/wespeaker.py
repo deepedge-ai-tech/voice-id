@@ -488,6 +488,8 @@ class WespeakerClient:
     sliding_window_secs: float = 0.6  # 滑动窗口长度（秒）
     sliding_hop_secs: float = 0.2  # 滑动窗口步长（秒）
     sliding_score_mode: str = "max"  # 分数聚合模式: max 或 top_k_mean
+    # ---- 内置声纹 ----
+    package_pk_index: int | None = None  # 内置声纹索引: 0=John 1=Frank 2=Michael 3=Qingqing 4=Xixi 5=Zhong
 
     # ---- 内部 ----
     _model: Optional[torch.nn.Module] = field(init=False, default=None, repr=False)
@@ -576,8 +578,22 @@ class WespeakerClient:
             "pk_path": str(out.resolve()),
         }
 
-    def recognize(self, audio_path: str, pk_path: str) -> dict:
-        """将音频与已保存的声纹比对，返回识别结果."""
+    def recognize(self, audio_path: str, pk_path: str | None = None) -> dict:
+        """将音频与已保存的声纹比对，返回识别结果.
+
+        pk_path 为 None 时默认使用内置 John 声纹 (index 0)。
+        若 package_pk_index 已设置则优先使用。
+        """
+        # 解析声纹路径: package_pk_index > pk_path > 默认 John
+        if self.package_pk_index is not None:
+            from ._voiceprints import get_voiceprint_path
+
+            pk_path = get_voiceprint_path(self.package_pk_index)
+        elif pk_path is None:
+            from ._voiceprints import get_voiceprint_path
+
+            pk_path = get_voiceprint_path(0)
+
         logger.info("Recognizing %s against %s", audio_path, pk_path)
         if not Path(audio_path).is_file():
             return {"is_recognized": False, "confidence": 0.0, "error": f"文件不存在: {audio_path}"}
@@ -892,9 +908,15 @@ def main() -> None:
 
     p_rec = sub.add_parser("recognize", help="识别声纹")
     p_rec.add_argument("audio")
-    p_rec.add_argument("voiceprint")
+    p_rec.add_argument("voiceprint", nargs="?", default=None, help="声纹 .pkl 路径（省略则使用内置 John 声纹）")
     p_rec.add_argument("--model-path", default="./models/wespeaker")
     p_rec.add_argument("--device", default="cpu")
+    p_rec.add_argument(
+        "--package-pk-index",
+        type=int,
+        default=None,
+        help="内置声纹索引: 0=John 1=Frank 2=Michael 3=Qingqing 4=Xixi 5=Zhong（优先级高于 voiceprint）",
+    )
     p_rec.add_argument("--threshold", type=float, default=0.75)
     p_rec.add_argument(
         "--dynamic-threshold", action="store_true", help="启用基于 VAD 时长的动态阈值"
@@ -941,6 +963,7 @@ def main() -> None:
             sliding_window_secs=args.sliding_window_secs,
             sliding_hop_secs=args.sliding_hop_secs,
             sliding_score_mode=args.sliding_score_mode,
+            package_pk_index=args.package_pk_index,
         )
         r = client.recognize(args.audio, args.voiceprint)
         logger.info("识别结果: %s", {k: v for k, v in r.items() if k != "debug_audio"})
