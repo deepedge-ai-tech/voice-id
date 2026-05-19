@@ -862,7 +862,8 @@ def _debug_save_test_audio(waveform: torch.Tensor, sample_rate: int, score: floa
         dst = dst_dir / f"{datetime.now():%Y%m%d_%H%M%S_%f}-{score:.4f}.wav"
         save_wav = waveform.unsqueeze(0) if waveform.ndim == 1 else waveform
         torchaudio.save(str(dst), save_wav.cpu(), sample_rate)
-        logger.debug("测试音频已保存: %s", dst)
+        logger.info("[DEBUG] 测试音频已保存 → %s", dst)
+        logger.info("[DEBUG] 临时目录: %s", tempfile.gettempdir())
     except Exception:
         logger.warning("保存调试音频失败", exc_info=True)
 
@@ -874,6 +875,9 @@ def _debug_save_test_audio(waveform: torch.Tensor, sample_rate: int, score: floa
 
 def main() -> None:
     """CLI 入口点 - 用于 pip 安装后的 console script."""
+    env = os.environ.get("ENV_NAME", "<not set>")
+    logger.info("ENV_NAME=%s", env)
+
     import argparse
 
     parser = argparse.ArgumentParser(description="WeSpeaker 声纹注册与识别")
