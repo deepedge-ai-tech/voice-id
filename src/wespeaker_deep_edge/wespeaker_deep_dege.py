@@ -127,7 +127,7 @@ class DeepConfig:
     short_audio_max_duration: float = 1.5  # 短音频判定阈值（秒）
 
     # 内置声纹
-    package_pk_index: int | None = None  # 内置声纹索引: 0=John 1=Frank 2=Michael 3=Qingqing 4=Xixi 5=Zhong
+    package_pk_index: int | None = None  # 内置声纹索引: 0=John 1=Frank 2=Michael 3=Qingqing 4=Xixi 5=Zhong 6=John_usb_yun
 
     def to_dict(self) -> dict:
         return {
