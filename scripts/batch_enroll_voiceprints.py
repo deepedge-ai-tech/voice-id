@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 import torchaudio
 import torch
-from wespeaker_deep_edge.wespeaker import WespeakerClient, _load_audio
+from wespeaker_deep_edge.client import WespeakerClient, _load_audio
 
 
 ASSET = Path(__file__).resolve().parent.parent / "asset"

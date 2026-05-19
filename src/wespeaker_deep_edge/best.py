@@ -39,8 +39,8 @@ import torch.nn.functional as F
 
 logger = logging.getLogger(__name__)
 
-from .wespeaker import _vad_segments  # 用于噪声提取，不用于注册/识别预处理
-from .wespeaker import (
+from .client import _vad_segments  # 用于噪声提取，不用于注册/识别预处理
+from .client import (
     WespeakerClient,
     _apply_silero_vad,
     _extract_embedding,

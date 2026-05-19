@@ -23,7 +23,7 @@ from .best import (
     BestConfig,
     WespeakerBest,
 )
-from .wespeaker import (
+from .client import (
     WespeakerClient,
     _crop_verify,
     _estimate_snr,

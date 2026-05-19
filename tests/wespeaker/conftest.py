@@ -2,7 +2,7 @@
 
 import pytest
 
-from src.wespeaker_deep_edge.wespeaker import WespeakerClient
+from src.wespeaker_deep_edge.client import WespeakerClient
 
 
 @pytest.fixture

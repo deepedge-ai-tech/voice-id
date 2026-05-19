@@ -200,15 +200,12 @@ class RealtimeMonitor:
     def _extract_score(self, audio: np.ndarray) -> float:
         """Extract embedding from audio and compute cosine similarity."""
         import torch
-        import torch.nn.functional as F
 
-        waveform = torch.from_numpy(audio)
+        waveform = torch.from_numpy(audio).unsqueeze(0)  # (1, n)
         emb = self.model.extract_embedding_from_pcm(waveform, self.sample_rate)
         if emb is None:
             return 0.0
-        emb = F.normalize(emb, dim=0)
-        vp = F.normalize(self.voiceprint, dim=0)
-        return float(torch.dot(emb, vp).clamp(-1.0, 1.0).item())
+        return float(self.model.cosine_similarity(emb, self.voiceprint))
 
     def _format_display(self, score: float | None, rms: float, elapsed: float) -> str:
         """Format the terminal display line."""

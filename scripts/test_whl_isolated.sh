@@ -43,7 +43,7 @@ uv pip install "$WHL" --quiet 2>&1
 echo ""
 echo "=== 测试 1: import + 默认模型路径 ==="
 python -c "
-from wespeaker_deep_edge.wespeaker import _get_default_model_path
+from wespeaker_deep_edge.client import _get_default_model_path
 path = _get_default_model_path()
 import os
 assert os.path.isdir(path), f'模型目录不存在: {path}'
@@ -58,7 +58,7 @@ for f in os.listdir(path):
 echo ""
 echo "=== 测试 2: 模型加载（CPU） ==="
 python -c "
-from wespeaker_deep_edge.wespeaker import _load_model, _get_default_model_path
+from wespeaker_deep_edge.client import _load_model, _get_default_model_path
 print('正在加载模型...')
 model = _load_model(_get_default_model_path(), 'cpu')
 print(f'✅ 模型加载成功，参数数量: {sum(p.numel() for p in model.parameters()):,}')
@@ -77,7 +77,7 @@ echo ""
 echo "=== 测试 4: embedding 提取 ==="
 python -c "
 import torch
-from wespeaker_deep_edge.wespeaker import _extract_embedding, _load_model, _get_default_model_path
+from wespeaker_deep_edge.client import _extract_embedding, _load_model, _get_default_model_path
 model = _load_model(_get_default_model_path(), 'cpu')
 # 2s 随机音频 → 提取 embedding
 audio = torch.randn(32000)
@@ -135,7 +135,7 @@ import sys, os, json
 from pathlib import Path
 from wespeaker_deep_edge.wespeaker_deep_dege import WespeakerDeep
 import torch, torchaudio
-from wespeaker_deep_edge.wespeaker import _load_audio
+from wespeaker_deep_edge.client import _load_audio
 
 asset_dir = Path(os.environ['ASSET_DIR'])
 reg_dir = asset_dir / 'registration_segments'
