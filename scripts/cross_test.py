@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""声纹交叉测试 — WespeakerDeep 版本 (含 John_usb_yun)。
+"""声纹交叉测试 — 纯 wespeaker 官方包 (standalone)。
 
 测试场景:
   注册: John, John_USB, John_MeetingRoom, John_D_USB, John_D_USB_AEC,
-        Xixi, Frank, Qingqing, Zhong, Zhong_D_USB, John_usb_yun
-  测试: 每人 test_segments 目录（没有则用 registration_segments）
+        Xixi, Frank, Qingqing, Zhong, Zhong_D_USB
+  测试: 每人 test_segments 目录
 
 用法:
     uv run python scripts/cross_test.py
@@ -13,20 +13,18 @@
     uv run python scripts/cross_test.py --verbose
 """
 
+import argparse
 import logging
 import sys
 from datetime import datetime
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-
+import matplotlib
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
-import torch
-import torchaudio
-
-from wespeaker_deep_edge.wespeaker_deep_dege import WespeakerDeep, DeepConfig
-from wespeaker_deep_edge.wespeaker import _apply_silero_vad, _crop_to_duration
+import seaborn as sns
+import wespeaker
 
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
 
@@ -39,50 +37,62 @@ plt.rcParams["axes.unicode_minus"] = False
 
 SPEAKERS = {
     "John": {
-        "register_dir": "asset/john/registration_segments",
-        "test_segments_dir": "asset/john/test_segments",
+        "register": "asset/john/registration_segments/segment_002.wav",
+        "test_dir": "asset/john/test_segments",
     },
     "John_USB": {
-        "register_dir": "asset/john_usb/registration_segments",
-        "test_segments_dir": "asset/john_usb/test_segments",
+        "register": "asset/john_usb/registration_segments/segment_002.wav",
+        "test_dir": "asset/john_usb/test_segments",
     },
     "John_MeetingRoom": {
-        "register_dir": "asset/john_metting_room/registration_segments",
-        "test_segments_dir": "asset/john_metting_room/test_segments",
+        "register": "asset/john_metting_room/registration_segments/segment_002.wav",
+        "test_dir": "asset/john_metting_room/test_segments",
     },
     "John_D_USB": {
-        "register_dir": "asset/john_d_usb/registration_segments",
-        "test_segments_dir": "asset/john_d_usb/test_segments",
+        "register": "asset/john_d_usb/registration_segments/segment_002.wav",
+        "test_dir": "asset/john_d_usb/test_segments",
     },
     "John_D_USB_AEC": {
-        "register_dir": "asset/john_d_usb_AEC/registration_segments",
-        "test_segments_dir": "asset/john_d_usb_AEC/test_segments",
+        "register": "asset/john_d_usb_AEC/registration_segments/segment_002.wav",
+        "test_dir": "asset/john_d_usb_AEC/test_segments",
     },
     "Xixi": {
-        "register_dir": "asset/xixi/registration_segments",
-        "test_segments_dir": "asset/xixi/test_segments",
+        "register": "asset/xixi/registration_segments/segment_002.wav",
+        "test_dir": "asset/xixi/test_segments",
     },
     "Frank": {
-        "register_dir": "asset/frank/registration_segments",
-        "test_segments_dir": "asset/frank/test_segments",
+        "register": "asset/frank/registration_segments/segment_02.wav",
+        "test_dir": "asset/frank/test_segments",
     },
     "Qingqing": {
-        "register_dir": "asset/qingqing/registration_segments",
-        "test_segments_dir": "asset/qingqing/test_segments",
+        "register": "asset/qingqing/registration_segments/segment_002.wav",
+        "test_dir": "asset/qingqing/test_segments",
     },
     "Zhong": {
-        "register_dir": "asset/zhong/registration_segments",
-        "test_segments_dir": "asset/zhong/test_segments",
+        "register": "asset/zhong/registration_segments/segment_002.wav",
+        "test_dir": "asset/zhong/test_segments",
     },
     "Zhong_D_USB": {
-        "register_dir": "asset/zhong_d_usb/registration_segments",
-        "test_segments_dir": "asset/zhong_d_usb/test_segments",
+        "register": "asset/zhong_d_usb/registration_segments/segment_002.wav",
+        "test_dir": "asset/zhong_d_usb/test_segments",
     },
 }
 
-# 同一人组映射
-# John 组：五个 John 变体属于同一人（包括 AEC 处理版本）
-# Zhong 组：两个 Zhong 变体属于同一人
+# Order for display: John group → Zhong group → others
+SPEAKER_ORDER = [
+    "John",
+    "John_USB",
+    "John_MeetingRoom",
+    "John_D_USB",
+    "John_D_USB_AEC",
+    "Zhong",
+    "Zhong_D_USB",
+    "Xixi",
+    "Frank",
+    "Qingqing",
+]
+
+# Same-person groups
 SAME_PERSON_GROUPS: dict[str, set[str]] = {
     "John": {"John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC"},
     "John_USB": {"John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC"},
@@ -95,16 +105,18 @@ SAME_PERSON_GROUPS: dict[str, set[str]] = {
 
 
 def is_same_person(speaker1: str, speaker2: str) -> bool:
-    """判断两个说话人是否属于同一人（考虑同一人的不同录制条件）."""
     if speaker1 == speaker2:
         return True
-    # 检查是否在同一人组中
-    group1 = SAME_PERSON_GROUPS.get(speaker1, {speaker1})
-    return speaker2 in group1
+    group = SAME_PERSON_GROUPS.get(speaker1, {speaker1})
+    return speaker2 in group
+
+
+def cosine_similarity(e1: np.ndarray, e2: np.ndarray) -> float:
+    return float(np.dot(e1, e2) / (np.linalg.norm(e1) * np.linalg.norm(e2) + 1e-12))
 
 
 # --------------------------------------------------------------------------- #
-#  可视化函数
+#  可视化
 # --------------------------------------------------------------------------- #
 
 
@@ -115,8 +127,6 @@ def plot_heatmap(
     threshold: float,
     output_path: Path | None = None,
 ) -> None:
-    """绘制相似度热力图."""
-    # 动态调整高度：每个测试片段分配更多空间
     fig_height = max(16, len(row_labels) * 0.35)
     fig, ax = plt.subplots(figsize=(18, fig_height))
 
@@ -126,42 +136,29 @@ def plot_heatmap(
     ax.set_yticks(np.arange(len(row_labels)))
     ax.set_xticklabels(col_labels, fontsize=12)
     ax.set_yticklabels(row_labels, fontsize=9)
-
     plt.setp(ax.get_xticklabels(), rotation=45, ha="right", rotation_mode="anchor")
 
     for i in range(len(row_labels)):
         for j in range(len(col_labels)):
             text_color = "white" if scores[i, j] < threshold else "black"
-            text = ax.text(
-                j,
-                i,
-                f"{scores[i, j]:.3f}",
-                ha="center",
-                va="center",
-                color=text_color,
-                fontsize=9,
+            ax.text(
+                j, i, f"{scores[i, j]:.3f}",
+                ha="center", va="center", color=text_color, fontsize=9,
             )
 
     ax.set_title(
         f"声纹交叉识别矩阵 (阈值 = {threshold:.2f})\n"
         f"生成时间: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}",
-        fontsize=16,
-        pad=20,
+        fontsize=16, pad=20,
     )
     ax.set_xlabel("注册声纹", fontsize=14)
     ax.set_ylabel("测试音频", fontsize=14)
-
-    cbar = plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
-    cbar.set_label("相似度得分", rotation=270, labelpad=20, fontsize=13)
+    plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04, label="相似度得分")
 
     plt.tight_layout()
-
     if output_path:
         plt.savefig(output_path, dpi=300, bbox_inches="tight")
-        print(f"\n📊 热力图已保存: {output_path}")
-    else:
-        plt.show()
-
+        print(f"\n热力图已保存: {output_path}")
     plt.close()
 
 
@@ -170,23 +167,18 @@ def plot_summary_bar(
     threshold: float,
     output_path: Path | None = None,
 ) -> None:
-    """绘制各说话人自识别得分柱状图."""
     speakers = list(diagonal_scores.keys())
-    avg_scores = [np.mean(scores) for scores in diagonal_scores.values()]
-    min_scores = [np.min(scores) for scores in diagonal_scores.values()]
+    avg_scores = [np.mean(scores) if scores else 0 for scores in diagonal_scores.values()]
+    min_scores = [np.min(scores) if scores else 0 for scores in diagonal_scores.values()]
 
     x = np.arange(len(speakers))
-    width = 0.6
-
     fig, ax = plt.subplots(figsize=(10, 6))
+    bars = ax.bar(x, avg_scores, width=0.6, label="平均得分", color="#4CAF50")
 
-    bars = ax.bar(x, avg_scores, width, label="平均得分", capsize=5, color="#4CAF50")
-
-    for i, (avg, min_val) in enumerate(zip(avg_scores, min_scores)):
-        ax.errorbar(i, avg, yerr=avg - min_val, fmt="none", ecolor="black", capsize=5)
+    for i, (avg, mn) in enumerate(zip(avg_scores, min_scores)):
+        ax.errorbar(i, avg, yerr=avg - mn, fmt="none", ecolor="black", capsize=5)
 
     ax.axhline(y=threshold, color="red", linestyle="--", linewidth=2, label=f"阈值 ({threshold})")
-
     ax.set_xlabel("说话人", fontsize=12)
     ax.set_ylabel("相似度得分", fontsize=12)
     ax.set_title("各说话人自识别得分统计", fontsize=14)
@@ -200,478 +192,296 @@ def plot_summary_bar(
         height = bar.get_height()
         ax.text(
             bar.get_x() + bar.get_width() / 2.0,
-            height + 0.02,
-            f"{score:.3f}",
-            ha="center",
-            va="bottom",
-            fontsize=10,
+            height + 0.02, f"{score:.3f}",
+            ha="center", va="bottom", fontsize=10,
         )
 
     plt.tight_layout()
-
     if output_path:
         plt.savefig(output_path, dpi=300, bbox_inches="tight")
-        print(f"📊 柱状图已保存: {output_path}")
-    else:
-        plt.show()
-
+        print(f"柱状图已保存: {output_path}")
     plt.close()
 
 
 # --------------------------------------------------------------------------- #
-#  交叉测试
+#  主流程
 # --------------------------------------------------------------------------- #
 
 
 def cross_test(
-    noise_path: str,
-    snr_levels: list[float],
     threshold: float,
     output_dir: Path | None = None,
     verbose: bool = False,
-    debug: bool = False,
-    enable_score_compensation: bool = False,
-    target_duration: float = 2.0,
 ) -> None:
-    """执行 9x9 交叉测试矩阵，集成诊断数据和报告生成.
+    print("=" * 60)
+    print("声纹交叉测试 (wespeaker vblinkf + VAD)")
+    print("=" * 60)
 
-    Args:
-        noise_path: 噪声音频文件路径
-        snr_levels: SNR 级别列表
-        threshold: 识别阈值
-        output_dir: 输出目录（可选）
-        verbose: 详细输出模式
-        debug: 调试模式
-        enable_score_compensation: 启用基于 VAD 时长的分数补偿
-        target_duration: 分数补偿的目标标准时长（秒）
-    """
-    # 配置日志级别
-    if debug:
-        logging.getLogger().setLevel(logging.DEBUG)
-    elif verbose:
-        logging.getLogger().setLevel(logging.INFO)
+    # 1. Load model
+    print("\n[1/4] 加载模型 vblinkf (VoxBlink2 SAM-ResNet34)...")
+    model = wespeaker.load_model("vblinkf")
+    model.set_vad(True)
+    print("  模型加载完成，VAD 已启用")
 
-    # 初始化 reporter 和 metrics
-    if output_dir is None:
-        output_dir = Path("experiment_log")
+    # 2. Collect files
+    print("\n[2/4] 收集注册和测试文件...")
+    active_people = list(SPEAKERS.keys())
+    enroll_files: dict[str, Path] = {}
+    test_files_map: dict[str, list[Path]] = {}
 
-    reporter = TerminalReporter(verbose=verbose, debug=debug)
-    metrics = PerformanceMetrics()
+    for person in SPEAKER_ORDER:
+        reg = Path(SPEAKERS[person]["register"])
+        if not reg.exists():
+            print(f"  WARNING: 注册文件不存在 {reg}，跳过 {person}")
+            active_people.remove(person)
+            continue
+        enroll_files[person] = reg
 
-    mode = "分数补偿" if enable_score_compensation else "固定"
-    reporter.print_header(threshold, snr_levels, mode)
+        test_dir = Path(SPEAKERS[person]["test_dir"])
+        tests = sorted(test_dir.glob("*.wav"))
+        if not tests:
+            print(f"  WARNING: 无测试文件 {test_dir}，跳过 {person}")
+            active_people.remove(person)
+            continue
+        test_files_map[person] = tests
+        print(f"  {person}: 注册={reg.name}, 测试文件={len(tests)}")
 
-    recognizer = WespeakerBest()
-    recognizer.config = recognizer.config.__class__(
-        **{
-            **vars(recognizer.config),
-            "sim_threshold": threshold,
-            "enable_score_compensation": enable_score_compensation,
-            "score_compensation_target_duration": target_duration,
-        }
-    )
+    N = len(active_people)
+    print(f"\n  活跃说话人 ({N}): {active_people}")
 
-    # 1. 加载模型
-    metrics.start("model_load")
-    recognizer._client._ensure_model()
-    metrics.end("model_load")
+    # 3. Extract embeddings
+    print(f"\n[3/4] 提取 embeddings...")
+    enroll_embs: dict[str, np.ndarray] = {}
+    test_embs: dict[str, list[np.ndarray]] = {}
 
-    # 2. 提取噪声 profile
-    if verbose:
-        print(f"\n提取噪声 profile: {noise_path}")
-    noise_profile = WespeakerBest.extract_noise_profile(noise_path)
-    if verbose:
-        print(f"  噪声长度: {len(noise_profile) / 16000:.1f}s")
+    for person in active_people:
+        # Enrollment
+        emb = model.extract_embedding(str(enroll_files[person]))
+        if emb is None:
+            print(f"  WARNING: {person} 注册 VAD 过滤全部音频，跳过")
+            active_people.remove(person)
+            continue
+        enroll_embs[person] = emb
+        print(f"  注册 {person}: 完成")
 
-    # 3. 注册所有说话人（集成诊断）
-    voiceprints: dict[str, torch.Tensor] = {}
-    tmp_pk = Path("/tmp/voice_cross.pkl")
-    tmp_pk.parent.mkdir(parents=True, exist_ok=True)
+        # Test files
+        embs = []
+        for f in test_files_map[person]:
+            e = model.extract_embedding(str(f))
+            if e is not None:
+                embs.append(e)
+        if not embs:
+            print(f"  WARNING: {person} 所有测试文件被 VAD 过滤，跳过")
+            # Can't remove from active_people mid-iteration, handle later
+        test_embs[person] = embs
+        print(f"  测试 {person}: {len(embs)}/{len(test_files_map[person])} 有效")
 
-    registration_data: dict[str, dict] = {}
+    # Filter to people with both enroll and test embeddings
+    active_people = [p for p in active_people if p in enroll_embs and p in test_embs and test_embs[p]]
+    N = len(active_people)
+    print(f"\n  最终有效说话人 ({N}): {active_people}")
 
-    for name, paths in SPEAKERS.items():
-        reg_dir = paths["register_dir"]
-        reporter.print_registration_start(name, reg_dir)
+    # 4. Compute similarity matrix
+    print(f"\n[4/4] 计算相似度矩阵...")
 
-        metrics.start(f"registration_{name}")
-        reg_diag = RegistrationDiagnostics(speaker=name)
+    # Per-file results
+    per_file_results: dict[str, list[tuple[str, list[float]]]] = {}
+    for tp in active_people:
+        entries = []
+        for fname, temb in zip(test_files_map[tp], test_embs[tp]):
+            scores = [cosine_similarity(temb, enroll_embs[ep]) for ep in active_people]
+            entries.append((fname.name, scores))
+        per_file_results[tp] = entries
 
-        # 收集注册片段信息
-        reg_path = Path(reg_dir)
-        segment_files = sorted(reg_path.glob("*.wav")) + sorted(reg_path.glob("*.m4a"))
+    # Aggregate matrix
+    sim_matrix = np.zeros((N, N), dtype=np.float32)
+    for i, tp in enumerate(active_people):
+        for j, ep in enumerate(active_people):
+            vals = [e[1][j] for e in per_file_results[tp]]
+            sim_matrix[i][j] = np.mean(vals)
 
-        # 执行注册
-        result = recognizer.enroll(reg_dir, noise_profile, str(tmp_pk), snr_levels)
-        voiceprints[name] = result["embedding"]
+    # 5. Print results
+    col_labels = active_people
+    header = f"{'测试说话人':14s} {'测试文件':30s}" + "".join(f"{c:>10s}" for c in col_labels)
+    print("\n" + "=" * len(header))
+    print("每文件详细结果")
+    print("=" * len(header))
+    print(header)
+    print("-" * len(header))
 
-        # 添加片段信息到诊断（使用实际的片段 embeddings）
-        fragment_embeddings = result.get("fragment_embeddings", [])
-        for i, seg_file in enumerate(segment_files):
-            import torchaudio
+    for tp in active_people:
+        for fname, scores in per_file_results[tp]:
+            scores_str = "".join(f"{s:>10.3f}" for s in scores)
+            print(f"{tp:14s} {fname:30s} {scores_str}")
+        print()
 
-            waveform, sr = torchaudio.load(seg_file)
-            duration = waveform.shape[1] / sr
-            # 使用对应的片段 embedding（如果可用）
-            if i < len(fragment_embeddings):
-                reg_diag.add_segment(seg_file.name, duration, sr, fragment_embeddings[i])
+    # 6. Stats by same-person groups
+    print("=" * 60)
+    print("分组统计")
+    print("=" * 60)
+
+    same_scores_all = []
+    diff_scores_all = []
+    for i, tp in enumerate(active_people):
+        for j, ep in enumerate(active_people):
+            vals = [e[1][j] for e in per_file_results[tp]]
+            if is_same_person(tp, ep):
+                same_scores_all.extend(vals)
             else:
-                # 回退到使用均值 embedding（向后兼容）
-                reg_diag.add_segment(seg_file.name, duration, sr, result["embedding"])
+                diff_scores_all.extend(vals)
 
-        # 记录噪声注入效果（模拟）
-        for snr in snr_levels:
-            reg_diag.record_noise_injection(
-                snr_level=snr,
-                original_rms=0.1,  # 简化值
-                mixed_rms=0.1 * 10 ** (-snr / 20),  # 简化计算
-            )
+    same_mean = np.mean(same_scores_all) * 100
+    diff_mean = np.mean(diff_scores_all) * 100
+    gap = same_mean - diff_mean
 
-        metrics.end(f"registration_{name}")
-        registration_data[name] = reg_diag.to_dict()
-        reporter.print_registration_summary(name, registration_data[name])
+    print(f"\n  同人平均:     {same_mean:.1f}%")
+    print(f"  异人平均:     {diff_mean:.1f}%")
+    print(f"  差距:         {gap:.1f}%")
 
-        if debug:
-            reporter.print_debug_embedding(f"{name} embedding", result["embedding"])
+    # Per-person stats
+    print(f"\n  每人统计:")
+    for i, p in enumerate(active_people):
+        self_scores = [e[1][i] for e in per_file_results[p]]
+        # Find reference indices that are same person (including self)
+        same_indices = [j for j, ep in enumerate(active_people) if is_same_person(p, ep) and j != i]
+        other_indices = [j for j, ep in enumerate(active_people) if not is_same_person(p, ep)]
 
-    # 4. 交叉识别矩阵（集成诊断）
-    # 定义说话人组排序顺序：John 组 → Zhong 组 → 其他独立说话人
-    SPEAKER_ORDER = [
-        "John",
-        "John_USB",
-        "John_MeetingRoom",
-        "John_D_USB",
-        "John_D_USB_AEC",
-        "Zhong",
-        "Zhong_D_USB",
-        "Xixi",
-        "Frank",
-        "Qingqing",
-    ]
+        same_other = []
+        for e in per_file_results[p]:
+            for si in same_indices:
+                same_other.append(e[1][si])
+        diff = []
+        for e in per_file_results[p]:
+            for oi in other_indices:
+                diff.append(e[1][oi])
 
-    # 使用排序后的说话人顺序
-    ordered_speakers = [name for name in SPEAKER_ORDER if name in SPEAKERS]
-    col_headers = [f"{name} 声纹" for name in ordered_speakers]
-    col_width = 12
-    header = f"{'':>14} | " + " | ".join(f"{h:>{col_width}}" for h in col_headers)
-    sep = "-" * len(header)
+        self_mean = np.mean(self_scores) * 100 if self_scores else 0
+        same_other_mean = np.mean(same_other) * 100 if same_other else 0
+        diff_mean_p = np.mean(diff) * 100 if diff else 0
+        n = len(per_file_results[p])
+        print(f"    {p:16s}: 自身={self_mean:5.1f}%  同组其他={same_other_mean:5.1f}%  异人={diff_mean_p:5.1f}%  n={n}")
 
-    if verbose:
-        print(f"\n{'=' * len(header)}")
-        print("  交叉识别矩阵 (阈值 = {:.2f})".format(threshold))
-        print(f"{'=' * len(header)}")
-        print(header)
-        print(sep)
-
-    all_passed = True
-    test_cases: list[dict] = []
-    errors: dict = {"false_accepts": [], "false_rejects": []}
-
-    # 收集用于可视化的数据
-    col_names = list(SPEAKERS.keys())
-    diagonal_scores: dict[str, list[float]] = {name: [] for name in SPEAKERS.keys()}
-
-    # 创建排序后的列名到索引的映射
-    col_order_map = {name: i for i, name in enumerate(SPEAKER_ORDER) if name in SPEAKERS}
-
-    # 先收集所有测试数据，稍后按 VAD 时长排序
-    test_data_list: list[dict] = []
-
-    for test_speaker, speaker_data in SPEAKERS.items():
-        test_dir = Path(speaker_data["test_segments_dir"])
-        test_files = sorted(test_dir.glob("*.wav"))
-
-        for audio_file in test_files:
-            label = audio_file.name
-            row_label = f"{test_speaker}/{label}"
-            row_scores: list[float] = []
-
-            metrics.start(f"recognize_{row_label}")
-
-            # 创建识别诊断对象
-            recog_diag = RecognitionDiagnostics(
-                test_speaker=test_speaker,
-                test_variant=label,
-                threshold=threshold,
-            )
-
-            # 加载测试音频获取预处理信息
-            import torchaudio
-
-            waveform, sr = torchaudio.load(audio_file)
-            original_duration = waveform.shape[1] / sr
-
-            # 转换为单声道
-            waveform_mono = waveform.mean(dim=0)
-
-            # 先用 Silero VAD 去除静音
-            waveform_vad = _apply_silero_vad(waveform_mono, sr)
-            vad_duration = waveform_vad.shape[0] / sr
-
-            # 再裁剪到 2 秒
-            waveform_final = _crop_to_duration(waveform_vad, 2.0, sr)
-            final_duration = waveform_final.shape[0] / sr
-
-            rms_energy = float(waveform_final.norm())
-            # 设置预处理信息（包含VAD前后的时长）
-            recog_diag.set_preprocessing_info(
-                duration=final_duration,
-                sample_rate=sr,
-                rms_energy=rms_energy,
-                original_duration=original_duration,
-                vad_duration=vad_duration,
-            )
-
-            # 保存裁剪后的音频到临时文件用于识别
-            temp_audio_path = tmp_pk.parent / "temp_test_audio.wav"
-            torchaudio.save(str(temp_audio_path), waveform_final.unsqueeze(0), sr)
-
-            if verbose:
-                row = f"{row_label:>30} |"
-
-            # 按排序后的顺序遍历参考声纹
-            for ref_name in ordered_speakers:
-                ref_emb = voiceprints[ref_name]
-                with open(tmp_pk, "wb") as f:
-                    pickle.dump(ref_emb.cpu().numpy(), f)
-
-                result = recognizer.recognize(str(temp_audio_path), str(tmp_pk))
-                score = result["confidence"]
-                is_match = result["is_recognized"]
-
-                # 添加比较结果到诊断
-                recog_diag.add_comparison(ref_name, float(score), is_match)
-
-                row_scores.append(score)
-
-                # 判断是否为同一人（考虑同一人的不同录制条件）
-                same_person = is_same_person(test_speaker, ref_name)
-
-                if same_person:
-                    # 对角线方向（同一人或同一人的不同变体）
-                    diagonal_scores[test_speaker].append(score)
-                    # 设置 confidence 为正确说话人的得分
-                    recog_diag.confidence = float(score)
-                    # 这是正确的匹配
-                    if not is_match:
-                        # 误拒绝
-                        recog_diag.record_false_negative(float(score))
-                        errors["false_rejects"].append(
-                            {
-                                "test_speaker": test_speaker,
-                                "test_variant": label,
-                                "ref_speaker": ref_name,
-                                "score": float(score),
-                                "threshold_distance": threshold - float(score),
-                            }
-                        )
-                        all_passed = False
+    # 7. Error analysis
+    errors = {"false_accepts": [], "false_rejects": []}
+    for tp in active_people:
+        for fname, scores in per_file_results[tp]:
+            for j, ep in enumerate(active_people):
+                score = scores[j]
+                if is_same_person(tp, ep):
+                    if score < threshold:
+                        errors["false_rejects"].append({
+                            "test": tp, "file": fname, "ref": ep,
+                            "score": score, "gap": threshold - score,
+                        })
                 else:
-                    # 这是不同的说话人，应该拒绝
-                    if is_match:
-                        # 误接受
-                        recog_diag.record_false_positive(ref_name, float(score))
-                        errors["false_accepts"].append(
-                            {
-                                "test_speaker": test_speaker,
-                                "test_variant": label,
-                                "mistaken_as": ref_name,
-                                "score": float(score),
-                                "threshold_distance": float(score) - threshold,
-                            }
-                        )
-                        all_passed = False
+                    if score >= threshold:
+                        errors["false_accepts"].append({
+                            "test": tp, "file": fname, "mistaken_as": ep,
+                            "score": score, "gap": score - threshold,
+                        })
 
-                if verbose:
-                    mark = "✅" if is_match else "❌"
-                    ok = is_match if same_person else not is_match
-                    status = "✅" if ok else "⚠️ "
-                    row += f" {score:.4f} {mark} {status} |"
-                else:
-                    reporter.print_recognition_progress(row_label, ref_name, float(score), is_match)
+    total = sum(len(per_file_results[tp]) * N for tp in active_people)
+    n_fa = len(errors["false_accepts"])
+    n_fr = len(errors["false_rejects"])
+    print(f"\n  总比对: {total}, 误接受: {n_fa} ({n_fa/total*100:.1f}%), "
+          f"误拒绝: {n_fr} ({n_fr/total*100:.1f}%)")
 
-            metrics.end(f"recognize_{row_label}")
+    if verbose and errors["false_accepts"]:
+        print(f"\n  误接受详情:")
+        for e in errors["false_accepts"][:10]:
+            print(f"    {e['test']}/{e['file']} → {e['mistaken_as']}: 得分={e['score']:.3f} 超出阈值={e['gap']:.3f}")
 
-            # 保存测试用例数据
-            test_case_dict = recog_diag.to_dict()
-            test_case_dict["row_label"] = row_label
-            test_cases.append(test_case_dict)
+    if verbose and errors["false_rejects"]:
+        print(f"\n  误拒绝详情:")
+        for e in errors["false_rejects"][:10]:
+            print(f"    {e['test']}/{e['file']} → {e['ref']}: 得分={e['score']:.3f} 低于阈值={e['gap']:.3f}")
 
-            # 收集到列表中，稍后排序
-            test_data_list.append(
-                {
-                    "test_speaker": test_speaker,
-                    "label": label,
-                    "vad_duration": vad_duration,
-                    "row_scores": row_scores,
-                    "test_case_dict": test_case_dict,
-                }
-            )
-
-            if verbose:
-                print(row.rstrip(" |"))
-
-    # 5. 先按人分组，每个人内部按 VAD 时长降序排序
-    test_data_list.sort(key=lambda x: (x["test_speaker"], -x["vad_duration"]))
-
-    # 构建排序后的 row_labels 和 scores_matrix
-    row_labels: list[str] = []
-    scores_matrix: list[list[float]] = []
-
-    for data in test_data_list:
-        test_speaker = data["test_speaker"]
-        label = data["label"]
-        vad_duration = data["vad_duration"]
-        # row_label 显示 VAD 处理后的时长
-        row_label = f"{test_speaker}/{label} ({vad_duration:.2f}s)"
-        row_labels.append(row_label)
-        # 按 SPEAKER_ORDER 重新排列分数
-        row_scores = data["row_scores"]
-        reordered_scores = [row_scores[i] for i in sorted(col_order_map.values())]
-        scores_matrix.append(reordered_scores)
-
-    # 6. 总结
-    total_tests = len(scores_matrix)
-    passed_tests = total_tests - len(errors["false_accepts"]) - len(errors["false_rejects"])
-    reporter.print_test_summary(total_tests, passed_tests, errors)
-
-    # 6. 生成图表和报告
+    # 8. Save charts
     if output_dir:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
 
-        timestamp = datetime.now()
+        # Build per-file matrix
+        row_labels: list[str] = []
+        per_file_arr: list[list[float]] = []
+        for tp in active_people:
+            for fname, scores in per_file_results[tp]:
+                row_labels.append(f"{tp}/{fname}")
+                per_file_arr.append(scores)
+        scores_array = np.array(per_file_arr, dtype=np.float32)
 
-        scores_array = np.array(scores_matrix)
-        # 使用排序后的列名
-        ordered_col_names = [name for name in SPEAKER_ORDER if name in SPEAKERS]
-        col_labels = [f"{name} 声纹" for name in ordered_col_names]
-
-        # 生成热力图
-        heatmap_path = output_dir / f"cross_test_heatmap_{timestamp.strftime('%Y%m%d_%H%M%S')}.png"
+        # Heatmap
+        heatmap_path = output_dir / f"cross_test_heatmap_{timestamp}.png"
         plot_heatmap(scores_array, row_labels, col_labels, threshold, heatmap_path)
 
-        # 生成柱状图
-        bar_path = output_dir / f"cross_test_summary_{timestamp.strftime('%Y%m%d_%H%M%S')}.png"
-        plot_summary_bar(diagonal_scores, threshold, bar_path)
+        # Aggregate heatmap
+        agg_path = output_dir / f"cross_test_aggregate_{timestamp}.png"
+        fig, ax = plt.subplots(figsize=(10, 8))
+        sns.heatmap(
+            sim_matrix,
+            xticklabels=col_labels, yticklabels=col_labels,
+            annot=True, fmt=".3f", cmap="RdYlGn",
+            vmin=-0.2, vmax=1.0,
+            cbar_kws={"label": "Cosine Similarity"},
+            linewidths=1, linecolor="white", ax=ax,
+        )
+        ax.set_title(f"WeSpeaker 交叉测试聚合 (vblinkf + VAD, 阈值={threshold})", fontsize=14)
+        ax.set_xlabel("注册声纹", fontsize=12)
+        ax.set_ylabel("测试说话人 (平均)", fontsize=12)
+        plt.tight_layout()
+        fig.savefig(agg_path, dpi=150, bbox_inches="tight")
+        print(f"聚合热力图已保存: {agg_path}")
+        plt.close()
 
-        # 生成诊断报告
-        report_data = {
-            "meta": {
-                "threshold": threshold,
-                "snr_levels": snr_levels,
-                "noise_path": str(noise_path),
-            },
-            "registration": registration_data,
-            "recognition": {
-                "test_cases": test_cases,
-                "errors": errors,
-                "performance": {
-                    "total_time": sum(metrics.get_timings().values()),
-                    "timings": metrics.get_summary()["operations"],
-                },
-            },
-        }
+        # Bar chart
+        diag_scores = {tp: [e[1][i] for e in per_file_results[tp]]
+                       for i, tp in enumerate(active_people)}
+        bar_path = output_dir / f"cross_test_summary_{timestamp}.png"
+        plot_summary_bar(diag_scores, threshold, bar_path)
 
-        # Markdown 报告
-        md_gen = MarkdownReportGenerator(output_dir)
-        md_path = md_gen.generate(report_data, timestamp)
-        print(f"\n📄 诊断报告已保存: {md_path}")
-
-        # JSON 数据导出
-        json_exporter = JsonDataExporter(output_dir)
-        json_path = json_exporter.export(report_data, timestamp)
-        print(f"📊 JSON 数据已导出: {json_path}")
+    # 9. Summary line
+    print("\n" + "-" * 60)
+    print(f"SUMMARY: 同人={same_mean:.1f}%, 异人={diff_mean:.1f}%, "
+          f"差距={gap:.1f}%, FA={n_fa}, FR={n_fr}")
+    print("-" * 60)
 
 
 # --------------------------------------------------------------------------- #
-#  CLI 入口
+#  CLI
 # --------------------------------------------------------------------------- #
 
 
 def main() -> None:
-    import argparse
-
-    parser = argparse.ArgumentParser(description="声纹交叉测试 — 10x10 识别矩阵 (John 组, Xixi, Frank, Qingqing, Zhong 组)")
-    parser.add_argument(
-        "--noise",
-        default="asset/john/嘈杂环境测试.m4a",
-        help="噪声音频文件（用于注册时噪声注入）",
+    parser = argparse.ArgumentParser(
+        description="声纹交叉测试 — 纯 wespeaker 官方包 (vblinkf + VAD)"
     )
     parser.add_argument(
-        "--snrs",
-        default="20,15,10,5,0",
-        help="SNR 级别，逗号分隔 (default: 20,15,10,5,0)",
-    )
-    parser.add_argument(
-        "--threshold",
-        type=float,
-        default=0.55,
+        "--threshold", type=float, default=0.55,
         help="识别阈值 (default: 0.55)",
     )
     parser.add_argument(
-        "--output-dir",
-        "-o",
-        type=str,
-        default=None,
-        help="图表和报告输出目录（不指定则不生成）",
+        "--output-dir", "-o", type=str, default=None,
+        help="图表输出目录",
     )
     parser.add_argument(
-        "--verbose",
-        "-v",
-        action="store_true",
+        "--verbose", "-v", action="store_true",
         help="详细输出模式",
-    )
-    parser.add_argument(
-        "--debug",
-        "-d",
-        action="store_true",
-        help="调试模式（打印 embedding 调试信息）",
-    )
-    parser.add_argument(
-        "--score-compensation",
-        action="store_true",
-        help="启用基于 VAD 时长的分数补偿（短音频分数提升）",
-    )
-    parser.add_argument(
-        "--target-duration",
-        type=float,
-        default=2.0,
-        help="分数补偿目标时长（秒），默认 2.0",
     )
     args = parser.parse_args()
 
-    snr_levels = [float(x.strip()) for x in args.snrs.split(",")]
-
-    # 验证文件存在
-    for speaker_name, speaker_data in SPEAKERS.items():
-        reg_dir = Path(speaker_data["register_dir"])
-        if not reg_dir.is_dir():
-            print(f"错误: 注册目录不存在: {reg_dir}")
+    # Verify asset files exist
+    for name, cfg in SPEAKERS.items():
+        if not Path(cfg["register"]).exists():
+            print(f"错误: 注册文件不存在: {cfg['register']}")
             sys.exit(1)
-        test_dir = Path(speaker_data["test_segments_dir"])
-        if not test_dir.is_dir():
-            print(f"错误: 测试片段目录不存在: {test_dir}")
+        test_dir = Path(cfg["test_dir"])
+        if not test_dir.is_dir() or not list(test_dir.glob("*.wav")):
+            print(f"错误: 测试目录无 .wav 文件: {test_dir}")
             sys.exit(1)
-        # 检查是否有 wav 文件
-        if not list(test_dir.glob("*.wav")):
-            print(f"错误: 测试片段目录中没有 .wav 文件: {test_dir}")
-            sys.exit(1)
-    if not Path(args.noise).is_file():
-        print(f"错误: 噪声音频不存在: {args.noise}")
-        sys.exit(1)
 
     output_path = Path(args.output_dir) if args.output_dir else None
-    cross_test(
-        args.noise,
-        snr_levels,
-        args.threshold,
-        output_path,
-        args.verbose,
-        args.debug,
-        args.score_compensation,
-        args.target_duration,
-    )
+    cross_test(args.threshold, output_path, args.verbose)
 
 
 if __name__ == "__main__":
