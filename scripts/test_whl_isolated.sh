@@ -41,27 +41,32 @@ echo "📥 安装 whl..."
 uv pip install "$WHL" --quiet 2>&1
 
 echo ""
-echo "=== 测试 1: import + 默认模型路径 ==="
+echo "=== 测试 1: 内置模型 + vendored wespeaker ==="
 python -c "
-from wespeaker_deep_edge.client import _get_default_model_path
-path = _get_default_model_path()
-import os
-assert os.path.isdir(path), f'模型目录不存在: {path}'
-assert os.path.isfile(os.path.join(path, 'pytorch_model.bin')), 'pytorch_model.bin 缺失'
-assert os.path.isfile(os.path.join(path, 'config.yaml')), 'config.yaml 缺失'
-print(f'✅ 内置模型路径: {path}')
-for f in os.listdir(path):
-    size = os.path.getsize(os.path.join(path, f))
-    print(f'   {f}: {size:,} bytes')
+import os, sys
+from pathlib import Path
+from wespeaker_deep_edge.wespeaker_deep_dege import WespeakerDeep
+
+# 验证 vendored wespeaker
+import wespeaker
+print(f'✅ wespeaker 来自: {wespeaker.__file__}')
+assert '_wespeaker' in str(wespeaker.__file__), '未从 vendored 路径加载'
+
+# 验证模型加载
+deep = WespeakerDeep()
+assert deep._model is not None
+print(f'✅ 内置 vblinkf 模型加载成功')
 "
 
 echo ""
-echo "=== 测试 2: 模型加载（CPU） ==="
+echo "=== 测试 2: WespeakerDeep 模型加载 ==="
 python -c "
-from wespeaker_deep_edge.client import _load_model, _get_default_model_path
-print('正在加载模型...')
-model = _load_model(_get_default_model_path(), 'cpu')
-print(f'✅ 模型加载成功，参数数量: {sum(p.numel() for p in model.parameters()):,}')
+from wespeaker_deep_edge.wespeaker_deep_dege import WespeakerDeep
+deep = WespeakerDeep()
+import torch
+# underlying torch model is at Speaker.model
+params = sum(p.numel() for p in deep._model.model.parameters())
+print(f'✅ 模型加载成功，参数数量: {params:,}')
 "
 
 echo ""
@@ -74,20 +79,22 @@ print(f'✅ deep_config.sim_threshold = {deep.deep_config.sim_threshold}')
 "
 
 echo ""
-echo "=== 测试 4: embedding 提取 ==="
+echo "=== 测试 4: embedding 提取（WespeakerDeep） ==="
 python -c "
 import torch
-from wespeaker_deep_edge.client import _extract_embedding, _load_model, _get_default_model_path
-model = _load_model(_get_default_model_path(), 'cpu')
-# 2s 随机音频 → 提取 embedding
-audio = torch.randn(32000)
-emb = _extract_embedding(model, audio)
-import torch.nn.functional as F
-emb = F.normalize(emb, dim=0)
+from wespeaker_deep_edge.wespeaker_deep_dege import WespeakerDeep
+
+deep = WespeakerDeep()
+# 2s 随机 PCM → 提取 embedding
+waveform = torch.randn(1, 32000)
+emb = deep._model.extract_embedding_from_pcm(waveform, 16000)
 assert emb.shape == (256,), f'期望 (256,)，实际 {emb.shape}'
 print(f'✅ embedding 维度: {emb.shape}')
-print(f'✅ embedding 范数: {float(emb.norm()):.4f}')
-print(f'✅ embedding 前 5 维: {emb[:5].tolist()}')
+print(f'✅ embedding 范数: {float(emb.pow(2).sum().sqrt()):.4f}')
+
+# cosine_similarity with self should be 1.0
+score = deep._model.cosine_similarity(emb, emb)
+print(f'✅ 自相似度: {score:.4f} (应为 1.0)')
 "
 
 echo ""
@@ -109,10 +116,10 @@ with tempfile.TemporaryDirectory() as tmpdir:
     # 生成 3s 注册音频（不同频率正弦波）
     t = np.arange(sr * 3, dtype=np.float32) / sr
     tone = (0.5 * np.sin(2 * np.pi * 300 * t)).astype(np.float32)
-    sf.write(str(tmpdir / 'enroll.wav'), tone, sr)
+    sf.write(str(Path(tmpdir) / 'enroll.wav'), tone, sr)
 
     # 注册
-    result = deep.enroll(str(tmpdir / 'enroll.wav'), pk_path=str(pk_path))
+    result = deep.enroll(str(Path(tmpdir) / 'enroll.wav'), pk_path=str(pk_path))
     assert result['ok'], f'注册失败: {result}'
     print(f'✅ 注册成功: dim={result[\"embedding_dim\"]}')
 

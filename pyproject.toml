@@ -1,10 +1,10 @@
 [project]
 name = "wespeaker-deep-edge"
-version = "0.1.19"
+version = "0.1.20"
 description = "WeSpeaker 声纹识别工具 — 独立的声纹注册与识别 CLI 工具"
 readme = "README.md"
 license = "MIT"
-requires-python = ">=3.10"
+requires-python = "==3.10.19"
 authors = [
     { name = "WeSpeaker Contributors" }
 ]
@@ -37,8 +37,10 @@ dependencies = [
     "umap-learn==0.5.6",
     # wespeaker 内置依赖（vendored _wespeaker/）
     "accelerate",
+    "onnxruntime>=1.16,<2.0",
     "openai-whisper",
     "peft",
+    "scikit-learn",
 ]
 
 [project.urls]

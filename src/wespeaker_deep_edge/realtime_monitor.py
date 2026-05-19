@@ -166,8 +166,8 @@ class RealtimeMonitor:
         window_secs: float = 2.0,
         step_secs: float = 0.5,
         buffer_secs: float = 60.0,
-        threshold: float = 0.55,
-        rms_threshold: float = 0.005,
+        threshold: float = 0.70,
+        rms_threshold: float = 0.02,
         sample_rate: int = 16000,
     ) -> None:
         import torch
@@ -301,8 +301,8 @@ def main() -> None:
     parser.add_argument("--window-secs", type=float, default=2.0)
     parser.add_argument("--step-secs", type=float, default=0.5)
     parser.add_argument("--buffer-secs", type=float, default=60.0)
-    parser.add_argument("--threshold", type=float, default=0.55)
-    parser.add_argument("--rms-threshold", type=float, default=0.005)
+    parser.add_argument("--threshold", type=float, default=0.70)
+    parser.add_argument("--rms-threshold", type=float, default=0.02)
     list_group = parser.add_mutually_exclusive_group()
     list_group.add_argument("--list-devices", action="store_true", help="列出可用音频设备并退出")
     list_group.add_argument("--device-index", type=int, default=None, help="指定麦克风设备索引")
@@ -330,6 +330,8 @@ def main() -> None:
 
     # Initialize model
     client = WespeakerDeep(model_path=args.model_path, device=args.device)
+    # Enable VAD to filter non-speech — matches official_cross_test.py behavior
+    client._model.set_vad(True)
 
     # Load voiceprint
     voiceprint = torch.from_numpy(client.load(vp_path))
