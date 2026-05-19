@@ -338,12 +338,16 @@ class WespeakerDeep(WespeakerBest):
         pk_path: str | Path = "voice.pkl",
         snr_levels: list[float] | None = None,
     ) -> dict[str, Any]:
-        """纯净注册声纹 — 不注入噪声，保留每文件独立 embedding。
+        """纯净注册声纹 — 按 enrollment_segment_secs 切段，不注入噪声。
+
+        每个 wav 文件被切成 0.6s（默认）不重叠的小段，每段独立提
+        embedding 作为 template，供多模板匹配。
 
         与父类 enroll() 的核心区别:
           - noise_profile 默认 None（不需要噪声音频）
           - 跳过 VAD（enroll_skip_vad=True）
           - 不注入噪声（enroll_clean_only=True）
+          - 按 enrollment_segment_secs 切段（默认 0.6s）
           - .pkl 保存为 dict 格式，含 templates 列表供多模板匹配
 
         Args:
@@ -353,7 +357,7 @@ class WespeakerDeep(WespeakerBest):
             snr_levels: SNR 级别列表。clean_only 模式下忽略。
 
         Returns:
-            {"ok": True, "num_segments": int, "num_templates": int,
+            {"ok": True, "num_files": int, "num_templates": int,
              "embedding_dim": int, "pk_path": str}
         """
         self._client._ensure_model()
@@ -368,21 +372,32 @@ class WespeakerDeep(WespeakerBest):
         if noise_profile is not None and self._deep_config.enroll_clean_only:
             logger.warning("enroll_clean_only=True，noise_profile 参数被忽略")
 
-        logger.info("Deep enroll: %d clean segments (clean-only=%s, skip-vad=%s)",
-                     len(clean_paths), self._deep_config.enroll_clean_only,
+        logger.info("Deep enroll: %d files, seg_len=%.2fs (clean-only=%s, skip-vad=%s)",
+                     len(clean_paths), self._deep_config.enrollment_segment_secs,
+                     self._deep_config.enroll_clean_only,
                      self._deep_config.enroll_skip_vad)
 
+        seg_len = int(self._deep_config.enrollment_segment_secs * self._client.sample_rate)
         all_embeddings: list[np.ndarray] = []
 
         for path in clean_paths:
-            seg = _load_audio(path, self._client.sample_rate)
+            waveform = _load_audio(path, self._client.sample_rate)
 
-            if not self._deep_config.enroll_skip_vad:
-                seg = _apply_silero_vad(seg, self._client.sample_rate)
+            if waveform.numel() < seg_len:
+                logger.warning("音频太短，跳过: %s (%.2fs)", path, waveform.numel() / self._client.sample_rate)
+                continue
 
-            emb = _extract_embedding(self._client._model, seg)
-            emb = F.normalize(emb, dim=0)
-            all_embeddings.append(emb.cpu().numpy())
+            for i in range(waveform.numel() // seg_len):
+                seg = waveform[i * seg_len : (i + 1) * seg_len]
+
+                if not self._deep_config.enroll_skip_vad:
+                    seg = _apply_silero_vad(seg, self._client.sample_rate)
+                    if seg.numel() == 0:
+                        continue
+
+                emb = _extract_embedding(self._client._model, seg)
+                emb = F.normalize(emb, dim=0)
+                all_embeddings.append(emb.cpu().numpy())
 
         if not all_embeddings:
             return {"ok": False, "error": "无有效注册片段"}
@@ -394,6 +409,7 @@ class WespeakerDeep(WespeakerBest):
         # 保存为新格式 dict
         pkl_data = {
             "version": 1,
+            "seg_len_secs": self._deep_config.enrollment_segment_secs,
             "templates": all_embeddings,
             "reference": reference,
         }
@@ -404,17 +420,19 @@ class WespeakerDeep(WespeakerBest):
             pickle.dump(pkl_data, f)
 
         logger.info(
-            "Deep enrolled: %d segments → %d templates, dim=%d, saved to %s",
+            "Deep enrolled: %d files → %d templates (%.2fs/seg), dim=%d, saved to %s",
             len(clean_paths),
             len(all_embeddings),
+            self._deep_config.enrollment_segment_secs,
             reference.shape[0],
             out,
         )
 
         return {
             "ok": True,
-            "num_segments": len(clean_paths),
+            "num_files": len(clean_paths),
             "num_templates": len(all_embeddings),
+            "seg_len_secs": self._deep_config.enrollment_segment_secs,
             "embedding_dim": reference.shape[0],
             "pk_path": str(out.resolve()),
             "reference": reference,
