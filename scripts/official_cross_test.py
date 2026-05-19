@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Official WeSpeaker N×N cross-test with VAD, English model, async execution, and heatmap.
+"""Official WeSpeaker N×N cross-test with VAD, English model, and heatmap.
 
 Usage:
     cd Voice-ID
@@ -10,12 +10,13 @@ Output:
     - Image: scripts/output/official_cross_test_heatmap.png
 """
 
-import asyncio
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import matplotlib
-matplotlib.use("Agg")  # non-interactive backend for headless use
+
+matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
 import seaborn as sns
@@ -27,7 +28,6 @@ PEOPLE = ["john", "frank", "michael", "qingqing", "xixi", "zhong"]
 ASSET = Path("asset")
 OUTPUT_DIR = Path("scripts/output")
 
-# Registration file per person (frank uses 2-digit, others 3-digit)
 REG_FILES = {
     "john": "registration_segments/segment_002.wav",
     "frank": "registration_segments/segment_02.wav",
@@ -37,37 +37,22 @@ REG_FILES = {
     "zhong": "registration_segments/segment_002.wav",
 }
 
-# Test segment sources (michael has no test_segments/)
-TEST_DIRS = {
+TEST_DIRS: dict[str, str | None] = {
     "john": "test_segments",
     "frank": "test_segments",
-    "michael": None,  # use 测试.wav directly
+    "michael": None,
     "qingqing": "test_segments",
     "xixi": "test_segments",
     "zhong": "test_segments",
 }
 
-MAX_CONCURRENT = 1  # single-thread to avoid OOM
-
-# ── Feature extraction parameters ─────────────────────────────────────────────
-# Changing num_mel_bins/frame_length/frame_shift creates train/test mismatch
-# and will likely hurt accuracy. cmn is safe to toggle.
-NUM_MEL_BINS = 80       # FBank feature dimension
-FRAME_LENGTH = 25       # Frame length (ms)
-FRAME_SHIFT = 10        # Frame shift (ms)
-CMN = True              # Cepstral mean normalization
+NUM_MEL_BINS = 80
+FRAME_LENGTH = 25
+FRAME_SHIFT = 10
+CMN = True
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
-
-def get_test_files(person: str) -> list[Path]:
-    """Return sorted list of test .wav files for a person."""
-    base = ASSET / person
-    test_dir = TEST_DIRS[person]
-    if test_dir:
-        return sorted(base.glob(f"{test_dir}/*.wav"))
-    else:
-        return [base / "测试.wav"]
 
 
 def cosine_similarity(e1: np.ndarray, e2: np.ndarray) -> float:
@@ -75,204 +60,252 @@ def cosine_similarity(e1: np.ndarray, e2: np.ndarray) -> float:
     return float(np.dot(e1, e2) / (np.linalg.norm(e1) * np.linalg.norm(e2) + 1e-12))
 
 
-# ── Async embedding extraction ───────────────────────────────────────────────
-
-async def extract_embedding_async(model, audio_path: Path, sem: asyncio.Semaphore) -> np.ndarray:
-    """Run model.extract_embedding in a thread, bounded by semaphore."""
-    async with sem:
-        return await asyncio.to_thread(model.extract_embedding, str(audio_path))
+PATCHED = False
 
 
-async def extract_all_embeddings(
-    model, file_map: dict[str, list[Path]]
-) -> dict[str, list[np.ndarray]]:
-    """Extract embeddings for all files concurrently."""
-    sem = asyncio.Semaphore(MAX_CONCURRENT)
-    result: dict[str, list[np.ndarray]] = {}
+def load_model(
+    model_name: str = "vblinkf",
+    vad: bool = True,
+    num_mel_bins: int = NUM_MEL_BINS,
+    frame_length: int = FRAME_LENGTH,
+    frame_shift: int = FRAME_SHIFT,
+    cmn: bool = CMN,
+):
+    """Load WeSpeaker model and patch fbank parameters."""
+    global PATCHED
+    model = wespeaker.load_model(model_name)
 
-    for person, files in file_map.items():
-        tasks = [extract_embedding_async(model, f, sem) for f in files]
-        embs = await asyncio.gather(*tasks)
-        # Filter out None returns (VAD removed all audio)
-        valid = [e for e in embs if e is not None]
-        if len(valid) < len(embs):
-            print(f"  {person}: {len(embs) - len(valid)} files returned None (VAD filtered), keeping {len(valid)}")
-        result[person] = valid
-        print(f"  Extracted {len(result[person])} embeddings for {person}")
-
-    return result
-
-
-# ── Main ─────────────────────────────────────────────────────────────────────
-
-def main():
-    print("=" * 60)
-    print(f"WeSpeaker Cross-Test: vblinkf VAD+ cmn={CMN} mel={NUM_MEL_BINS} fl={FRAME_LENGTH} fs={FRAME_SHIFT}")
-    print("=" * 60)
-
-    # 1. Load model
-    print("\n[1/4] Loading English model with VAD enabled...")
-    t0 = time.time()
-    model = wespeaker.load_model("vblinkf")
-
-    # Monkey-patch compute_features to use custom fbank parameters
     import torch
     from torchaudio.compliance import kaldi
-    original_compute = model.compute_features
-    def patched_compute(wavform, sample_rate=16000, cmn=CMN):
-        feat = kaldi.fbank(
-            wavform,
-            num_mel_bins=NUM_MEL_BINS,
-            frame_length=FRAME_LENGTH,
-            frame_shift=FRAME_SHIFT,
-            sample_frequency=sample_rate,
-            window_type=model.window_type,
-        )
-        if cmn:
-            feat = feat - torch.mean(feat, dim=0)
-        return feat.unsqueeze(0)
-    model.compute_features = patched_compute
 
-    model.set_vad(True)
-    print(f"  Model loaded in {time.time() - t0:.1f}s")
+    if not PATCHED:
 
-    # 2. Collect files
-    print("\n[2/4] Collecting enrollment and test files...")
-    enroll_files: dict[str, Path] = {}
-    test_files_map: dict[str, list[Path]] = {}
-    for person in PEOPLE:
-        reg = ASSET / person / REG_FILES[person]
-        if not reg.exists():
-            print(f"  WARNING: {reg} not found, skipping {person}")
+        def _patched_compute(wavform, sample_rate=16000, cmn=cmn):
+            feat = kaldi.fbank(
+                wavform,
+                num_mel_bins=num_mel_bins,
+                frame_length=frame_length,
+                frame_shift=frame_shift,
+                sample_frequency=sample_rate,
+                window_type=model.window_type,
+            )
+            if cmn:
+                feat = feat - torch.mean(feat, dim=0)
+            return feat.unsqueeze(0)
+
+        model.compute_features = _patched_compute
+        PATCHED = True
+
+    if vad:
+        model.set_vad(True)
+    return model
+
+
+# ── Speaker ──────────────────────────────────────────────────────────────────
+
+
+class Speaker:
+    """One enrolled speaker.
+
+    Usage::
+
+        model = load_model()
+        alice = Speaker.enroll("alice", "alice.wav", model)
+        bob = Speaker.enroll("bob", "bob.wav", model)
+
+        score = alice.recognize("test.wav", model)       # single recognition
+        sim = alice.similarity(bob)                       # speaker vs speaker
+    """
+
+    def __init__(self, name: str, embedding: np.ndarray):
+        self.name = name
+        self.embedding = embedding
+
+    @classmethod
+    def enroll(cls, name: str, audio_path: Path | str, model) -> "Speaker":
+        """Create a Speaker by extracting embedding from an audio file."""
+        emb = model.extract_embedding(str(audio_path))
+        if emb is None:
+            raise ValueError(f"VAD filtered all audio in {audio_path}")
+        return cls(name, emb)
+
+    def similarity(self, other: "Speaker") -> float:
+        """Cosine similarity between this and another Speaker."""
+        return cosine_similarity(self.embedding, other.embedding)
+
+    def recognize(self, audio_path: Path | str, model) -> float:
+        """Recognize audio against this speaker. Returns similarity score."""
+        emb = model.extract_embedding(str(audio_path))
+        if emb is None:
+            return 0.0
+        return cosine_similarity(self.embedding, emb)
+
+
+# ── Cross-test ───────────────────────────────────────────────────────────────
+
+
+@dataclass
+class CrossTestResult:
+    """Results from run_cross_test()."""
+
+    speakers: list[Speaker]
+    test_files_map: dict[str, list[Path]]
+    test_embs: dict[str, list[np.ndarray]]
+    per_file_results: dict[str, list[tuple[str, list[float]]]]
+    sim_matrix: np.ndarray
+    same_mean: float
+    diff_mean: float
+    gap: float
+
+
+def run_cross_test(
+    speakers: list[Speaker],
+    test_files_map: dict[str, list[Path]],
+    model,
+) -> CrossTestResult:
+    """Run N×N cross-test: each test file against every enrolled speaker.
+
+    Args:
+        speakers: list of enrolled Speaker objects.
+        test_files_map: {person_name: [audio_paths]}.
+        model: loaded WeSpeaker model.
+
+    Returns:
+        CrossTestResult with similarity matrix and per-file scores.
+    """
+    name_to_speaker = {s.name: s for s in speakers}
+    active_people = sorted(
+        p for p in test_files_map if p in name_to_speaker and test_files_map[p]
+    )
+
+    # Extract test embeddings
+    test_embs: dict[str, list[np.ndarray]] = {}
+    for person, files in test_files_map.items():
+        if person not in name_to_speaker:
             continue
-        enroll_files[person] = reg
-        tests = get_test_files(person)
-        if not tests:
-            print(f"  WARNING: no test files for {person}, skipping")
-            continue
-        test_files_map[person] = tests
-        print(f"  {person}: enroll={reg.name}, tests={len(tests)} files")
+        embs = [model.extract_embedding(str(f)) for f in files]
+        valid = [e for e in embs if e is not None]
+        if len(valid) < len(embs):
+            print(
+                f"  {person}: {len(embs) - len(valid)} files returned None"
+                f" (VAD filtered), keeping {len(valid)}"
+            )
+        test_embs[person] = valid
+        print(f"  Extracted {len(valid)} embeddings for {person}")
 
-    active_people = list(enroll_files.keys())
-    print(f"\n  Active people: {active_people}")
-
-    # 3. Extract embeddings
-    print(f"\n[3/4] Extracting embeddings (max {MAX_CONCURRENT} concurrent)...")
-    t0 = time.time()
-
-    async def run_extraction():
-        # Enrollment embeddings
-        enroll_embs: dict[str, np.ndarray] = {}
-        sem_enroll = asyncio.Semaphore(MAX_CONCURRENT)
-        enroll_tasks = {
-            p: extract_embedding_async(model, f, sem_enroll)
-            for p, f in enroll_files.items()
-        }
-        for p, task in enroll_tasks.items():
-            emb = await task
-            if emb is None:
-                print(f"  WARNING: enroll {p} returned None (VAD filtered all audio), skipping")
-                continue
-            enroll_embs[p] = emb
-            print(f"  Enroll {p}: done")
-
-        # Test embeddings
-        test_embs = await extract_all_embeddings(model, test_files_map)
-        return enroll_embs, test_embs
-
-    enroll_embs, test_embs = asyncio.run(run_extraction())
-    print(f"  All embeddings extracted in {time.time() - t0:.1f}s")
-
-    # Filter to people who have both valid enrollment and test embeddings
-    active_people = [p for p in active_people
-                     if p in enroll_embs and p in test_embs and test_embs[p]]
+    active_people = sorted(p for p in active_people if test_embs.get(p))
     N = len(active_people)
-    print(f"\n  Effective people for matrix: {active_people} (N={N})")
 
-    # 4. Compute per-file similarity
-    print(f"\n[4/4] Computing similarities...")
-
-    # Store per-file results: for each test file, scores against all enrollments
-    # per_file_results[test_person] = [(filename, [scores]), ...]
+    # Per-file similarity
     per_file_results: dict[str, list[tuple[str, list[float]]]] = {}
-
     for test_person in active_people:
         entries = []
-        for test_file, test_emb in zip(test_files_map[test_person], test_embs[test_person]):
-            scores = []
-            for enroll_person in active_people:
-                score = cosine_similarity(test_emb, enroll_embs[enroll_person])
-                scores.append(score)
+        for test_file, test_emb in zip(
+            test_files_map[test_person], test_embs[test_person]
+        ):
+            scores = [
+                cosine_similarity(test_emb, name_to_speaker[enroll_p].embedding)
+                for enroll_p in active_people
+            ]
             entries.append((test_file.name, scores))
         per_file_results[test_person] = entries
 
-    # Aggregate matrix (mean per person)
+    # Aggregate matrix
     sim_matrix = np.zeros((N, N), dtype=np.float32)
-    std_matrix = np.zeros((N, N), dtype=np.float32)
     for i, tp in enumerate(active_people):
-        for j, ep in enumerate(active_people):
+        for j in range(N):
             vals = [e[1][j] for e in per_file_results[tp]]
             sim_matrix[i][j] = np.mean(vals)
-            std_matrix[i][j] = np.std(vals)
 
-    # 5. Print detailed per-file results
+    same_scores = [sim_matrix[i][i] for i in range(N)]
+    diff_scores = [
+        sim_matrix[i][j] for i in range(N) for j in range(N) if i != j
+    ]
+    same_mean = float(np.mean(same_scores)) * 100
+    diff_mean = float(np.mean(diff_scores)) * 100
+
+    return CrossTestResult(
+        speakers=speakers,
+        test_files_map=test_files_map,
+        test_embs=test_embs,
+        per_file_results=per_file_results,
+        sim_matrix=sim_matrix,
+        same_mean=same_mean,
+        diff_mean=diff_mean,
+        gap=same_mean - diff_mean,
+    )
+
+
+# ── Result rendering ────────────────────────────────────────────────────────
+
+
+def print_results(result: CrossTestResult) -> None:
+    """Print detailed per-file results and summary to console."""
+    active_people = sorted(result.per_file_results.keys())
+    N = len(active_people)
+    enroll_labels = [p.capitalize() for p in active_people]
+
     print("\n" + "=" * 90)
     print("Detailed Per-File Results")
     print("=" * 90)
 
-    enroll_labels = [p.capitalize() for p in active_people]
-    header = f"{'Test Person':14s} {'Test File':30s}" + "".join(f"{e:>9s}" for e in enroll_labels)
+    header = (
+        f"{'Test Person':14s} {'Test File':30s}"
+        + "".join(f"{e:>9s}" for e in enroll_labels)
+    )
     print(header)
     print("-" * 90)
 
     for test_person in active_people:
-        for fname, scores in per_file_results[test_person]:
+        for fname, scores in result.per_file_results[test_person]:
             scores_pct = "".join(f"{s * 100:>8.1f}%" for s in scores)
             print(f"{test_person:14s} {fname:30s} {scores_pct}")
-        print()  # blank line between groups
+        print()
 
-    # 6. Stats summary
     print("=" * 90)
     print("Summary Statistics")
     print("=" * 90)
-
-    same_scores = [sim_matrix[i][i] for i in range(N)]
-    diff_scores = [sim_matrix[i][j] for i in range(N) for j in range(N) if i != j]
-    same_mean = np.mean(same_scores) * 100
-    diff_mean = np.mean(diff_scores) * 100
-    gap = same_mean - diff_mean
-
-    print(f"\n  Same-person mean:     {same_mean:.1f}%")
-    print(f"  Different-person mean: {diff_mean:.1f}%")
-    print(f"  Gap:                   {gap:.1f}%")
+    print(f"\n  Same-person mean:     {result.same_mean:.1f}%")
+    print(f"  Different-person mean: {result.diff_mean:.1f}%")
+    print(f"  Gap:                   {result.gap:.1f}%")
 
     print(f"\n  Per-person (same-person only):")
     for i, p in enumerate(active_people):
-        n = len(per_file_results[p])
-        scores_self = [e[1][i] * 100 for e in per_file_results[p]]
-        scores_other = [e[1][j] * 100 for e in per_file_results[p] for j in range(N) if j != i]
-        print(f"    {p:12s}: self={np.mean(scores_self):5.1f}%  other={np.mean(scores_other):5.1f}%  gap={np.mean(scores_self) - np.mean(scores_other):5.1f}%  n={n}")
+        n = len(result.per_file_results[p])
+        scores_self = [e[1][i] * 100 for e in result.per_file_results[p]]
+        scores_other = [
+            e[1][j] * 100
+            for e in result.per_file_results[p]
+            for j in range(N)
+            if j != i
+        ]
+        other_mean = np.mean(scores_other) if scores_other else 0.0
+        print(
+            f"    {p:12s}: self={np.mean(scores_self):5.1f}%"
+            f"  other={other_mean:5.1f}%"
+            f"  gap={np.mean(scores_self) - other_mean:5.1f}%"
+            f"  n={n}"
+        )
 
-    # 7. Per-file heatmap
-    OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 
-    # Build the per-file matrix: rows = all test files, cols = enrollments
+def save_heatmaps(result: CrossTestResult, output_dir: Path = OUTPUT_DIR) -> None:
+    """Save per-file and aggregate similarity heatmaps to disk."""
+    active_people = sorted(result.per_file_results.keys())
+    N = len(active_people)
+    enroll_labels = [p.capitalize() for p in active_people]
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    # Per-file heatmap
     row_labels: list[str] = []
     per_file_matrix: list[list[float]] = []
     for test_person in active_people:
-        for fname, scores in per_file_results[test_person]:
+        for fname, scores in result.per_file_results[test_person]:
             row_labels.append(f"{test_person}/{fname}")
             per_file_matrix.append(scores)
 
     per_file_arr = np.array(per_file_matrix, dtype=np.float32) * 100
     n_rows = len(row_labels)
-
-    # Row colors: alternating by person group
-    row_colors = []
-    colors = ["#e8f4f8", "#f0f0f0"]
-    for i, tp in enumerate(active_people):
-        count = len(per_file_results[tp])
-        row_colors.extend([colors[i % 2]] * count)
 
     fig_height = max(6, n_rows * 0.35)
     plt.figure(figsize=(12, fig_height))
@@ -289,21 +322,28 @@ def main():
         linewidths=0.5,
         linecolor="white",
     )
-    plt.title("WeSpeaker Per-File Cross-Test (VoxBlink2 SAM-ResNet34 + VAD)", fontsize=14, pad=20)
+    plt.title(
+        "WeSpeaker Per-File Cross-Test (VoxBlink2 SAM-ResNet34 + VAD)",
+        fontsize=14,
+        pad=20,
+    )
     plt.xlabel("Enrollment Speaker", fontsize=12)
     plt.ylabel("Test File", fontsize=12)
     plt.tight_layout()
 
-    out_path = OUTPUT_DIR / "official_cross_test_per_file_heatmap.png"
+    out_path = output_dir / "official_cross_test_per_file_heatmap.png"
     plt.savefig(out_path, dpi=150)
     print(f"\n  Per-file heatmap saved to: {out_path}")
     plt.close()
 
-    # Also save aggregate heatmap
+    # Aggregate heatmap
     plt.figure(figsize=(10, 8))
-    annot_agg = [[f"{sim_matrix[i][j]*100:.1f}%" for j in range(N)] for i in range(N)]
+    annot_agg = [
+        [f"{result.sim_matrix[i][j] * 100:.1f}%" for j in range(N)]
+        for i in range(N)
+    ]
     sns.heatmap(
-        sim_matrix * 100,
+        result.sim_matrix * 100,
         xticklabels=enroll_labels,
         yticklabels=enroll_labels,
         annot=annot_agg,
@@ -315,19 +355,90 @@ def main():
         linewidths=1,
         linecolor="white",
     )
-    plt.title("WeSpeaker Cross-Test Aggregate (English Model + VAD)", fontsize=14, pad=20)
+    plt.title(
+        "WeSpeaker Cross-Test Aggregate (English Model + VAD)",
+        fontsize=14,
+        pad=20,
+    )
     plt.xlabel("Enrollment Speaker", fontsize=12)
     plt.ylabel("Test Speaker (avg)", fontsize=12)
     plt.tight_layout()
 
-    out_path = OUTPUT_DIR / "official_cross_test_heatmap.png"
+    out_path = output_dir / "official_cross_test_heatmap.png"
     plt.savefig(out_path, dpi=150)
     print(f"  Aggregate heatmap saved to: {out_path}")
     plt.close()
 
-    # 8. Summary line
+
+# ── Main ─────────────────────────────────────────────────────────────────────
+
+
+def main():
+    print("=" * 60)
+    print(
+        f"WeSpeaker Cross-Test: vblinkf VAD+ cmn={CMN}"
+        f" mel={NUM_MEL_BINS} fl={FRAME_LENGTH} fs={FRAME_SHIFT}"
+    )
+    print("=" * 60)
+
+    # 1. Load model
+    print("\n[1/4] Loading English model with VAD enabled...")
+    t0 = time.time()
+    model = load_model()
+    print(f"  Model loaded in {time.time() - t0:.1f}s")
+
+    # 2. Collect files & enroll
+    print("\n[2/4] Collecting enrollment and test files...")
+    speakers: list[Speaker] = []
+    test_files_map: dict[str, list[Path]] = {}
+    for person in PEOPLE:
+        reg = ASSET / person / REG_FILES[person]
+        if not reg.exists():
+            print(f"  WARNING: {reg} not found, skipping {person}")
+            continue
+
+        try:
+            speaker = Speaker.enroll(person, reg, model)
+            speakers.append(speaker)
+            print(f"  {person}: enroll={reg.name}, done")
+        except ValueError as e:
+            print(f"  WARNING: {e}, skipping {person}")
+            continue
+
+        base = ASSET / person
+        test_dir = TEST_DIRS[person]
+        tests = (
+            sorted(base.glob(f"{test_dir}/*.wav"))
+            if test_dir
+            else [base / "测试.wav"]
+        )
+        if tests:
+            test_files_map[person] = tests
+            print(f"  {person}: tests={len(tests)} files")
+
+    print(f"\n  Active people: {[s.name for s in speakers]}")
+
+    # 3. Cross-test
+    print(f"\n[3/4] Running cross-test...")
+    t0 = time.time()
+    result = run_cross_test(speakers, test_files_map, model)
+    print(f"  Done in {time.time() - t0:.1f}s")
+
+    print(f"\n  Effective people for matrix: {sorted(result.per_file_results.keys())}")
+
+    # 4. Print results
+    print_results(result)
+
+    # 5. Save heatmaps
+    save_heatmaps(result)
+
+    # 6. Summary line
     print("\n" + "-" * 60)
-    print(f"SUMMARY: Same={same_mean:.1f}%, Diff={diff_mean:.1f}%, Gap={gap:.1f}%")
+    print(
+        f"SUMMARY: Same={result.same_mean:.1f}%"
+        f", Diff={result.diff_mean:.1f}%"
+        f", Gap={result.gap:.1f}%"
+    )
     print("-" * 60)
 
 
