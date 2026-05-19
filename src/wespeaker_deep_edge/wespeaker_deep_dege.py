@@ -126,6 +126,9 @@ class DeepConfig:
     enable_sliding_window_test: bool = False  # 短音频滑动窗口（实验表明会推高 FAR，默认关闭）
     short_audio_max_duration: float = 1.5  # 短音频判定阈值（秒）
 
+    # 内置声纹
+    package_pk_index: int | None = None  # 内置声纹索引: 0=John 1=Frank 2=Michael 3=Qingqing 4=Xixi 5=Zhong
+
     def to_dict(self) -> dict:
         return {
             "sim_threshold": self.sim_threshold,
@@ -146,6 +149,7 @@ class DeepConfig:
             "enable_multi_template": self.enable_multi_template,
             "enable_sliding_window_test": self.enable_sliding_window_test,
             "short_audio_max_duration": self.short_audio_max_duration,
+            "package_pk_index": self.package_pk_index,
         }
 
     @classmethod
@@ -196,13 +200,18 @@ class WespeakerDeep(WespeakerBest):
         device: str = "cpu",
         sample_rate: int = 16000,
         config: DeepConfig | None = None,
+        package_pk_index: int | None = None,
     ) -> None:
         self._deep_config = config if config is not None else DeepConfig()
 
-        if model_path is None:
-            from .wespeaker import _get_default_model_path
+        # 内置声纹索引
+        if package_pk_index is not None:
+            self._deep_config.package_pk_index = package_pk_index
 
-            model_path = _get_default_model_path()
+        if model_path is None:
+            from .wespeaker import get_default_model_path
+
+            model_path = get_default_model_path()
 
         # 构造兼容的 BestConfig 传给父类
         best_config = BestConfig(
@@ -419,7 +428,7 @@ class WespeakerDeep(WespeakerBest):
     def recognize(
         self,
         audio_path: str | Path,
-        voiceprint: np.ndarray | str | Path,
+        voiceprint: np.ndarray | str | Path | None = None,
     ) -> dict[str, Any]:
         """将音频与声纹比对 — 多模板 + 滑动窗口 + sqrt 分数补偿。
 
@@ -432,7 +441,7 @@ class WespeakerDeep(WespeakerBest):
 
         Args:
             audio_path: 待测试音频文件路径。
-            voiceprint: 声纹（numpy 数组 / .pkl 路径）。
+            voiceprint: 声纹（numpy 数组 / .pkl 路径）。None 时使用内置声纹。
 
         Returns:
             {"is_recognized": bool, "confidence": float, "threshold": float,
@@ -449,6 +458,13 @@ class WespeakerDeep(WespeakerBest):
 
         self._client._ensure_model()
         cfg = self._deep_config
+
+        # ---- 解析声纹路径: package_pk_index > voiceprint > 默认 John ----
+        if voiceprint is None:
+            from ._voiceprints import get_voiceprint_path
+
+            index = cfg.package_pk_index if cfg.package_pk_index is not None else 0
+            voiceprint = get_voiceprint_path(index)
 
         # ---- 加载声纹 ----
         if isinstance(voiceprint, np.ndarray):

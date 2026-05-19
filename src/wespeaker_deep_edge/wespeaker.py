@@ -28,7 +28,7 @@ import torch.nn.functional as F
 logger = logging.getLogger(__name__)
 
 
-def _get_default_model_path() -> str:
+def get_default_model_path() -> str:
     """返回内置模型路径（优先），fallback 到 ./models/wespeaker。"""
     try:
         return str(
@@ -169,7 +169,13 @@ def _apply_silero_vad(
 
 @lru_cache(maxsize=1)
 def _load_model(model_path: str, device: str) -> torch.nn.Module:
-    """加载 WeSpeaker ResNet34 模型，缓存单例."""
+    """加载 WeSpeaker ResNet34 模型，缓存单例.
+
+    model_path 为空字符串时，自动使用默认模型路径。
+    """
+    if not model_path:
+        model_path = get_default_model_path()
+
     try:
         from pyannote.audio import Model
     except ImportError as exc:
@@ -456,7 +462,7 @@ class WespeakerClient:
     """
 
     # ---- 模型 ----
-    model_path: str = field(default_factory=_get_default_model_path)
+    model_path: str = field(default_factory=get_default_model_path)
     device: str = "cpu"
 
     # ---- 注册 ----

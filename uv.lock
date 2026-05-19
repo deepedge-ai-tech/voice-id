@@ -4057,7 +4057,7 @@ wheels = [
 
 [[package]]
 name = "wespeaker-deep-edge"
-version = "0.1.12"
+version = "0.1.15"
 source = { editable = "." }
 dependencies = [
     { name = "audiomentations" },
