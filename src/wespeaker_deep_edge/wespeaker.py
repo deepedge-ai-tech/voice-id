@@ -840,7 +840,7 @@ def _sliding_window_scores(
 
 
 def _debug_save_test_audio(waveform: torch.Tensor, sample_rate: int, score: float) -> None:
-    """当 ENV_NAME == DEBUG 时，将测试音频保存到临时文件夹。
+    """将每次识别的音频保存到临时文件夹 wespeaker_debug/。
 
     文件名: {当前日期时间}-{置信度}.wav
 
@@ -849,8 +849,6 @@ def _debug_save_test_audio(waveform: torch.Tensor, sample_rate: int, score: floa
         sample_rate: 采样率。
         score: 识别置信度（用于文件名）。
     """
-    if os.environ.get("ENV_NAME") != "DEBUG":
-        return
     try:
         import tempfile
         from datetime import datetime
@@ -875,9 +873,6 @@ def _debug_save_test_audio(waveform: torch.Tensor, sample_rate: int, score: floa
 
 def main() -> None:
     """CLI 入口点 - 用于 pip 安装后的 console script."""
-    env = os.environ.get("ENV_NAME", "<not set>")
-    logger.info("ENV_NAME=%s", env)
-
     import argparse
 
     parser = argparse.ArgumentParser(description="WeSpeaker 声纹注册与识别")
