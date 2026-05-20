@@ -12,19 +12,20 @@
     4      Xixi
     5      Zhong
     6      John_usb_yun
+    7      Angle
     =====  ============
 """
 
 from importlib import resources
 
-_PEOPLE: list[str] = ["john", "frank", "michael", "qingqing", "xixi", "zhong", "john_usb_yun"]
+_PEOPLE: list[str] = ["john", "frank", "michael", "qingqing", "xixi", "zhong", "john_usb_yun", "angle"]
 
 
 def get_voiceprint_path(index: int) -> str:
     """返回第 index 个人的内置声纹 .pkl 文件绝对路径。
 
     Args:
-        index: 声纹索引 (0-6).
+        index: 声纹索引 (0-7).
 
     Returns:
         内置声纹文件路径。
@@ -46,7 +47,7 @@ def get_voiceprint_name(index: int) -> str:
     """返回第 index 个人的名字。
 
     Args:
-        index: 声纹索引 (0-6).
+        index: 声纹索引 (0-7).
 
     Returns:
         名字字符串。

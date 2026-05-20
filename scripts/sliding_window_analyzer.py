@@ -29,7 +29,7 @@ import numpy as np
 import torch
 import torchaudio
 
-from src.wespeaker_deep_edge.client import _load_silero_vad
+from src.wespeaker_deep_edge._utils import _load_silero_vad
 from src.wespeaker_deep_edge.wespeaker_deep_dege import WespeakerDeep
 
 logger = logging.getLogger(__name__)

@@ -48,7 +48,7 @@ from wespeaker_deep_edge.reporters import (
     MarkdownReportGenerator,
     TerminalReporter,
 )
-from wespeaker_deep_edge.client import _apply_silero_vad, _crop_to_duration
+from wespeaker_deep_edge._utils import _apply_silero_vad, _crop_to_duration
 
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
 
@@ -275,7 +275,7 @@ def cross_test_deep(
             continue
 
         # 拼接所有注册片段为单个音频 → 注册
-        from wespeaker_deep_edge.client import _load_audio
+        from wespeaker_deep_edge._utils import _load_audio
         import torch as _torch
 
         concat_wav = _torch.cat([_load_audio(str(f)) for f in segment_files])

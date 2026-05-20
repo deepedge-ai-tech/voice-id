@@ -3,7 +3,7 @@
 
 测试场景:
   注册: John, John_USB, John_MeetingRoom, John_D_USB, John_D_USB_AEC,
-        Xixi, Frank, Qingqing, Zhong, Zhong_D_USB
+        Xixi, Frank, Qingqing, Zhong, Zhong_D_USB, Angle
   测试: 每人 test_segments 目录
 
 用法:
@@ -87,6 +87,10 @@ SPEAKERS = {
         "register": str(ASSET_COMBINE / "Zhong.wav"),
         "test_dir": "asset/zhong_d_usb/test_segments",
     },
+    "Angle": {
+        "register": str(ASSET_COMBINE / "angle.wav"),
+        "test_dir": "asset/angle/test_segments",
+    },
 }
 
 # Order for display: John group → Zhong group → others
@@ -103,6 +107,7 @@ SPEAKER_ORDER = [
     "Xixi",
     "Frank",
     "Qingqing",
+    "Angle",
 ]
 
 # Same-person groups
@@ -116,6 +121,10 @@ SAME_PERSON_GROUPS: dict[str, set[str]] = {
     "Michael": {"Michael"},
     "Zhong": {"Zhong", "Zhong_D_USB"},
     "Zhong_D_USB": {"Zhong", "Zhong_D_USB"},
+    "Xixi": {"Xixi"},
+    "Frank": {"Frank"},
+    "Qingqing": {"Qingqing"},
+    "Angle": {"Angle"},
 }
 
 

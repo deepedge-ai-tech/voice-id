@@ -69,7 +69,7 @@ def main():
         pk_path = Path(f"/tmp/vp_{name}.pkl")
         print(f"  {name}: ", end="", flush=True)
         # 拼接所有片段为单个音频后注册
-        from wespeaker_deep_edge.client import _load_audio
+        from wespeaker_deep_edge._utils import _load_audio
         import torch, torchaudio
         seg_files = sorted(reg_dir.glob("*.wav"))
         concat_wav = torch.cat([_load_audio(str(f)) for f in seg_files])

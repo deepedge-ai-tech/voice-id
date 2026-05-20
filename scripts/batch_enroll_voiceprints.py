@@ -1,18 +1,26 @@
-"""批量注册声纹 → 生成内置 .pkl 文件到 _voiceprints/。"""
+"""批量注册声纹 → 生成内置 .pkl 文件到 _voiceprints/。
+
+用法:
+    uv run python scripts/batch_enroll_voiceprints.py
+"""
 
 import sys
 from pathlib import Path
 
-# 确保能找到 src
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
-import torchaudio
 import torch
-from wespeaker_deep_edge.client import WespeakerClient, _load_audio
-
+import torchaudio
+from wespeaker_deep_edge._utils import _load_audio
+from wespeaker_deep_edge.wespeaker_deep_dege import WespeakerDeep
 
 ASSET = Path(__file__).resolve().parent.parent / "asset"
-DST = Path(__file__).resolve().parent.parent / "src" / "wespeaker_deep_edge" / "_voiceprints"
+DST = (
+    Path(__file__).resolve().parent.parent
+    / "src"
+    / "wespeaker_deep_edge"
+    / "_voiceprints"
+)
 
 PEOPLE = {
     "john": "John",
@@ -36,25 +44,17 @@ def enroll_person(person_dir: str, name_en: str) -> None:
         return
 
     print(f"  Concatenating {len(wavs)} segments ...")
-    # 加载所有 segment 并拼接
-    parts = []
-    for w in wavs:
-        parts.append(_load_audio(str(w)))
-    combined = torch.cat(parts)  # shape: (N,)
+    parts = [_load_audio(str(w)) for w in wavs]
+    combined = torch.cat(parts)
 
-    # 保存临时文件
     tmp = DST / f"_{name_en.lower()}_combined.wav"
     torchaudio.save(str(tmp), combined.unsqueeze(0), 16000)
 
-    # 注册
-    client = WespeakerClient(
-        enable_augmentation=False,
-        enable_multi_scale_enrollment=True,
-    )
+    deep = WespeakerDeep()
     out_path = DST / f"voice_{name_en.lower()}.pkl"
-    result = client.mp3_to_pk(str(tmp), str(out_path))
+    result = deep.enroll(str(tmp), str(out_path))
+    tmp.unlink()
     print(f"  Result: {result}")
-    tmp.unlink()  # 删除临时文件
     print(f"  Done → {out_path.name}")
 
 
