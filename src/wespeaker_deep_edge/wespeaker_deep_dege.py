@@ -44,11 +44,13 @@ class RecognitionResult(NamedTuple):
         is_recognized: 是否匹配（置信度 ≥ 阈值）。
         confidence: 余弦相似度 [0, 1]。
         name: 匹配的说话人名称。
+        all_scores: 所有模板的相似度字典 {name: score}，None 表示未启用。
     """
 
     is_recognized: bool
     confidence: float
     name: str
+    all_scores: dict[str, float] | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -383,6 +385,10 @@ class WespeakerDeep:
             is_recognized=bool(scores[best_pos] >= threshold),
             confidence=round(float(scores[best_pos]), 4),
             name=self._template_names[best_pos],
+            all_scores={
+                name: round(float(score), 4)
+                for name, score in zip(self._template_names, scores.tolist())
+            },
         )
 
     def recognize_multi(self, audio_path: str | Path) -> RecognitionResult:
