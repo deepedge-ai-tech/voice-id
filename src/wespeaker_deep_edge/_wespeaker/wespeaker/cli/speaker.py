@@ -17,13 +17,9 @@ import os
 import sys
 
 import numpy as np
-from silero_vad import load_silero_vad, read_audio, get_speech_timestamps
 import torch
 import torchaudio
 import torchaudio.compliance.kaldi as kaldi
-import yaml
-import kaldiio
-from tqdm import tqdm
 
 from wespeaker.cli.hub import Hub
 from wespeaker.cli.utils import get_args
@@ -62,6 +58,7 @@ class Speaker:
     def _get_vad(self):
         """Lazy-load Silero VAD on first use."""
         if self.vad is None:
+            from silero_vad import load_silero_vad
             self.vad = load_silero_vad()
         return self.vad
 
@@ -138,6 +135,7 @@ class Speaker:
 
     def extract_embedding_from_pcm(self, pcm: torch.Tensor, sample_rate: int):
         if self.apply_vad:
+            from silero_vad import get_speech_timestamps
             # TODO(Binbin Zhang): Refine the segments logic, here we just
             # suppose there is only silence at the start/end of the speech
             vad_sample_rate = 16000
@@ -180,6 +178,7 @@ class Speaker:
         return embedding
 
     def extract_embedding_list(self, scp_path: str):
+        from tqdm import tqdm
         names = []
         embeddings = []
         with open(scp_path, 'r') as read_scp:
@@ -224,6 +223,7 @@ class Speaker:
         return result
 
     def diarize(self, audio_path: str, utt: str = "unk"):
+        from silero_vad import read_audio, get_speech_timestamps
         assert self.model.frontend_type == 'fbank', \
             "Diarization only supports fbank frontend"
         pcm, sample_rate = torchaudio.load(audio_path, normalize=False)
@@ -283,6 +283,7 @@ class Speaker:
         return merged_segment_to_labels
 
     def diarize_list(self, scp_path: str):
+        from tqdm import tqdm
         utts = []
         segment2labels = []
         with open(scp_path, 'r', encoding='utf-8') as read_scp:
@@ -327,6 +328,7 @@ def load_model_pt(model_name_or_path: str):
         if not os.path.exists(os.path.join(model_dir, file)):
             raise FileNotFoundError(f"{file} not found in {model_dir}")
     # Read config file
+    import yaml
     with open(os.path.join(model_dir, 'config.yaml'), 'r') as f:
         config = yaml.load(f, Loader=yaml.FullLoader)
     # load model
@@ -386,6 +388,7 @@ def main():
         else:
             print('Fails to extract embedding')
     elif args.task == 'embedding_kaldi':
+        import kaldiio
         names, embeddings = model.extract_embedding_list(args.wav_scp)
         embed_ark = args.output_file + ".ark"
         embed_scp = args.output_file + ".scp"

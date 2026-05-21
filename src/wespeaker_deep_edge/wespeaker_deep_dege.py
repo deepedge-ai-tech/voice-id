@@ -18,29 +18,12 @@
 
 from __future__ import annotations
 
-# 使用 vendored wespeaker（位于 _wespeaker/），通过 importlib 注册
-# 确保所有子包（wespeaker.models, wespeaker.cli 等）的绝对导入都能正确解析
 import importlib.util
-import sys
-from pathlib import Path
-
-if 'wespeaker' not in sys.modules:
-    _wespeaker_dir = Path(__file__).parent / "_wespeaker" / "wespeaker"
-    _init_file = _wespeaker_dir / "__init__.py"
-    _spec = importlib.util.spec_from_file_location(
-        "wespeaker",
-        str(_init_file),
-        submodule_search_locations=[str(_wespeaker_dir)],
-    )
-    if _spec is None or _spec.loader is None:
-        raise ImportError(f"无法加载 vendored wespeaker: {_wespeaker_dir}")
-    _module = importlib.util.module_from_spec(_spec)
-    sys.modules['wespeaker'] = _module
-    _spec.loader.exec_module(_module)
-
 import logging
 import pickle
+import sys
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, NamedTuple
 
 import numpy as np
@@ -122,6 +105,21 @@ class WespeakerDeep:
             config: DeepConfig 配置对象。None 时使用默认 DeepConfig()。
             package_pk_index: 内置声纹索引，优先级高于 config 中的设置。
         """
+        # 首次使用时加载 vendored wespeaker（位于 _wespeaker/），
+        # 通过 importlib 注册确保子包绝对导入正确解析
+        if 'wespeaker' not in sys.modules:
+            _wespeaker_dir = Path(__file__).parent / "_wespeaker" / "wespeaker"
+            _init_file = _wespeaker_dir / "__init__.py"
+            _spec = importlib.util.spec_from_file_location(
+                "wespeaker",
+                str(_init_file),
+                submodule_search_locations=[str(_wespeaker_dir)],
+            )
+            if _spec is None or _spec.loader is None:
+                raise ImportError(f"cannot load vendored wespeaker: {_wespeaker_dir}")
+            _module = importlib.util.module_from_spec(_spec)
+            sys.modules['wespeaker'] = _module
+            _spec.loader.exec_module(_module)
         import wespeaker
 
 
