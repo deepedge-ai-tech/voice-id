@@ -31,11 +31,6 @@ import numpy as np
 
 logger = logging.getLogger("build_cohort")
 
-_DATASET_SOURCES: list[tuple[str, str, str]] = [
-    ("voxceleb1", "train", "VoxCeleb1"),
-    ("kpyu/cn-celeb", "train", "CN-Celeb"),
-]
-
 
 # --------------------------------------------------------------------------- #
 #  Vendored wespeaker loading (identical to WespeakerDeep)
