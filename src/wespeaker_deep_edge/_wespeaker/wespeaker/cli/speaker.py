@@ -38,10 +38,12 @@ from wespeaker.frontend import frontend_class_dict
 
 class Speaker:
 
-    def __init__(self, model_dir: str):
+    def __init__(self, model_dir: str, dtype: str = "float32"):
         set_seed()
         self.model = load_model_pt(model_dir)
-        self.vad = load_silero_vad()
+        if dtype == "float16":
+            self.model = self.model.half()
+        self.vad = None  # loaded lazily on first VAD use
         self.table = {}
         self.resample_rate = 16000
         self.apply_vad = False
@@ -56,6 +58,12 @@ class Speaker:
         self.diar_frame_shift = 10
         self.diar_batch_size = 32
         self.diar_subseg_cmn = True
+
+    def _get_vad(self):
+        """Lazy-load Silero VAD on first use."""
+        if self.vad is None:
+            self.vad = load_silero_vad()
+        return self.vad
 
     def set_wavform_norm(self, wavform_norm: bool):
         self.wavform_norm = wavform_norm
@@ -119,7 +127,7 @@ class Speaker:
                 batch_embs = batch_embs[-1] if isinstance(
                     batch_embs, tuple) else batch_embs
             embeddings.append(batch_embs.detach().cpu().numpy())
-        embeddings = np.vstack(embeddings)
+        embeddings = np.vstack(embeddings).astype(np.float32)
         return embeddings
 
     def extract_embedding(self, audio_path: str):
@@ -141,7 +149,7 @@ class Speaker:
                     orig_freq=sample_rate, new_freq=vad_sample_rate)
                 wav = transform(wav)
             segments = get_speech_timestamps(wav,
-                                             self.vad,
+                                             self._get_vad(),
                                              return_seconds=True)
             pcmTotal = torch.Tensor()
             if len(segments) > 0:  # remove all the silence
@@ -160,10 +168,13 @@ class Speaker:
         feats = self.compute_features(pcm,
                                       sample_rate=self.resample_rate,
                                       cmn=True)
+        model_dtype = next(self.model.parameters()).dtype
+        if feats.dtype != model_dtype:
+            feats = feats.to(model_dtype)
         with torch.no_grad():
             outputs = self.model(feats)
             outputs = outputs[-1] if isinstance(outputs, tuple) else outputs
-        embedding = outputs[0].to(torch.device('cpu'))
+        embedding = outputs[0].to(torch.device('cpu'), dtype=torch.float32)
         return embedding
 
     def extract_embedding_list(self, scp_path: str):
@@ -217,7 +228,7 @@ class Speaker:
         # 1. vad
         wav = read_audio(audio_path)
         vad_segments = get_speech_timestamps(wav,
-                                             self.vad,
+                                             self._get_vad(),
                                              return_seconds=True)
         if not vad_segments:
             return []
@@ -297,8 +308,8 @@ def load_or_download(model_name_or_path: str):
     return model_dir
 
 
-def load_model(model_name_or_path: str) -> Speaker:
-    return Speaker(load_or_download(model_name_or_path))
+def load_model(model_name_or_path: str, dtype: str = "float32") -> Speaker:
+    return Speaker(load_or_download(model_name_or_path), dtype=dtype)
 
 
 # Load the pytorch pt model which contains all the details.

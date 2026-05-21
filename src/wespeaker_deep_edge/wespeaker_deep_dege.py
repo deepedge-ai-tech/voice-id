@@ -106,7 +106,7 @@ class WespeakerDeep:
 
 
         model_dir = Path(__file__).parent / "_models" / "vblinkf"
-        self._model = wespeaker.load_model(str(model_dir))
+        self._model = wespeaker.load_model(str(model_dir), dtype="float16")
         self._model_dir = str(model_dir.resolve())
         self.sample_rate = sample_rate
         self._deep_config = config if config is not None else DeepConfig()
