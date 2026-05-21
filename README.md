@@ -15,11 +15,17 @@ WeSpeaker 声纹识别工具 — 独立的声纹注册与识别 CLI 工具。
 ## 安装
 
 ```bash
-# 从源码安装
+# 从源码安装（完整安装，含服务端推理）
 pip install .
 
 # 或使用 uv
 uv pip install .
+
+# 仅安装客户端 SDK（轻量，无需 torch）
+pip install "wespeaker-deep-edge[client]"
+
+# 仅安装服务端
+pip install "wespeaker-deep-edge[server]"
 ```
 
 ## 快速开始
@@ -60,62 +66,53 @@ wespeaker-deep-edge recognize test.mp3 voice.pkl --package-pk-index 2   # Michae
 ### Python API 使用
 
 ```python
-from wespeaker_deep_edge import WespeakerClient
+from wespeaker_deep_edge.wespeaker_deep_dege import WespeakerDeep, DeepConfig
 
-# 初始化客户端
-client = WespeakerClient()
+# 默认参数即为 18 轮实验验证的最优配置
+recognizer = WespeakerDeep()
 
 # 注册声纹
-client.mp3_to_pk("voice.mp3", "voice.pkl")
+recognizer.enroll("audio.wav", "voice.pkl")
 
-# 识别声纹（使用内置 John 声纹）
-result = client.recognize("test.mp3")  # pk_path 默认 None
+# 识别声纹（使用内置 John 声纹，无需传 pkl）
+result = recognizer.recognize("test.wav")
+print(f"识别结果: {result}")
 
 # 使用内置声纹（按 index）
-client.package_pk_index = 1  # Frank
-result = client.recognize("test.mp3")
+cfg = DeepConfig(package_pk_index=1)  # Frank
+recognizer2 = WespeakerDeep(config=cfg)
+result = recognizer2.recognize("test.wav")
 
 # 指定外部声纹文件
-result = client.recognize("test.mp3", "voice.pkl")
-print(f"识别结果: {result}")
+result = recognizer.recognize("test.wav", "voice.pkl")
 ```
 
-### 使用最佳配置（推荐）
+### WebSocket 服务端
 
-```python
-from wespeaker_deep_edge.wespeaker_deep_dege import WespeakerDeep
-
-# 默认参数即为 18 轮实验验证的最优配置，无需额外设置
-recognizer = WespeakerDeep(model_path="./models/wespeaker")
-
-# 注册声纹（纯干净注册 + 多模板）
-recognizer.enroll(
-    clean_dir="registration_segments/",
-    pk_path="voice.pkl"
-)
-
-# 识别
-result = recognizer.recognize("test_audio.wav", "voice.pkl")
+```bash
+# 启动服务
+wespeaker-deep-edge-server --port 10000 --storage-dir ./voiceprints
 ```
 
-### 使用旧版最佳配置
+### WebSocket 客户端 SDK
 
 ```python
-from wespeaker_deep_edge.best import WespeakerBest, BestConfig
+from wespeaker_deep_edge.client import SpeakerClient
 
-recognizer = WespeakerBest(model_path="./models/wespeaker")
+client = SpeakerClient("ws://localhost:10000")
+await client.connect()
 
-# 提取噪声 profile
-noise_profile = WespeakerBest.extract_noise_profile("noise.wav")
+# 注册声纹
+await client.enroll("audio.wav", "user_001")
 
-# 注册（multi-SNR 噪声注入）
-recognizer.enroll(
-    clean_dir="registration_segments/",
-    noise_profile=noise_profile,
-    pk_path="voice.pkl"
-)
+# 加载模板（支持预设声纹 preset_* 和用户注册 ID）
+await client.load(["user_001", "preset_john", "preset_frank"])
 
-result = recognizer.recognize("test_audio.wav", "voice.pkl")
+# 识别（矩阵批量 cosine similarity，返回最高分）
+result = await client.recognize("test.wav")
+print(f"识别结果: {result}")  # {"id": "preset_john", "score": 0.8523}
+
+await client.close()
 ```
 
 ## 最佳配置参数
@@ -145,38 +142,38 @@ result = recognizer.recognize("test_audio.wav", "voice.pkl")
 **注册流程**: 纯干净注册 → 每文件独立 embedding → 多模板保存
 **识别流程**: 多模板 max 匹配 → sqrt 分数补偿 → 短音频自动提分
 
-### WespeakerBest（旧方案，供参考）
-
-| 参数 | 值 | 说明 |
-|------|------|------|
-| sim_threshold | 0.55 | 识别阈值 |
-| verify_crop_mode | full_utterance | 使用完整音频 |
-| verify_buffer_keep_secs | 60.0 | 不截断音频 |
-| enable_vad | False | 完整音频得分更高 |
-| 注册增强 | multi-SNR 真实噪声注入 | 最优方案 |
-
 ## 项目结构
 
 ```
-wespeaker/
-├── src/wespeaker/
-│   ├── __init__.py
-│   ├── wespeaker.py      # 核心客户端
-│   └── best.py           # 最佳配置
-├── tests/                # 测试套件
-├── scripts/              # 实用脚本
-└── docs/                 # 文档
+Voice-ID/
+├── pyproject.toml                    # 项目配置与依赖
+├── src/wespeaker_deep_edge/          # ★ 主源码包
+│   ├── wespeaker_deep_dege.py        #   核心引擎 (WespeakerDeep)
+│   ├── server/                       #   WebSocket 服务端
+│   │   ├── ws_server.py              #     WS 协议处理
+│   │   └── template_manager.py       #     多模板矩阵管理
+│   ├── client/                       #   WebSocket 客户端 SDK
+│   │   └── speaker_client.py         #     SpeakerClient
+│   ├── _voiceprints/                 #   内置声纹（8人）
+│   ├── _models/                      #   内置模型
+│   └── _wespeaker/                   #   vendored 官方 WeSpeaker
+├── tests/                            # 测试套件
+├── scripts/                          # 实用脚本
+└── docs/                             # 文档
 ```
 
 ## 依赖
 
 - Python 3.10+
-- torch >= 2.11.0
-- torchaudio >= 2.11.0
-- numpy >= 2.4.4
-- audiomentations >= 0.43.1
-- pyannote-audio >= 4.0.4
-- silero-vad >= 5.1.2
+- torch >= 2.8.0
+- torchaudio >= 2.8.0
+- numpy == 1.26.4
+- pyannote-audio >= 3.3.2
+- websockets >= 12.0（server/client）
+- silero-vad
+- audiomentations >= 0.43.1（可选）
+
+> client 安装仅需 websockets + numpy + soundfile，不含 torch。
 
 ## 开发
 
