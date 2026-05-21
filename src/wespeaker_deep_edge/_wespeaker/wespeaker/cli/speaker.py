@@ -172,6 +172,7 @@ class Speaker:
         model_dtype = next(self.model.parameters()).dtype
         if feats.dtype != model_dtype:
             feats = feats.to(model_dtype)
+        feats = feats.to(self.device)
         with torch.no_grad():
             outputs = self.model(feats)
             outputs = outputs[-1] if isinstance(outputs, tuple) else outputs

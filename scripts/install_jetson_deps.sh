@@ -27,11 +27,11 @@ echo "========================================"
 
 if [ "${1:-}" = "pip" ]; then
     echo "[1/3] 安装 torch..."
-    pip install "$TORCH_URL"
+    pip --no-cache install "$TORCH_URL"
     echo "[2/3] 安装 torchaudio..."
-    pip install "$TORCHAUDIO_URL"
+    pip --no-cache install "$TORCHAUDIO_URL"
     echo "[3/3] 安装 torchvision..."
-    pip install "$TORCHVISION_URL"
+    pip --no-cache install "$TORCHVISION_URL"
 else
     echo "[1/3] 安装 torch..."
     uv add --no-cache "$TORCH_URL"
