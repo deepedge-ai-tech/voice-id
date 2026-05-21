@@ -32,11 +32,13 @@ class WSServer:
         port: int = 10000,
         storage_dir: str = "./voiceprints",
         model_path: str | None = None,
+        device: str = "cpu",
     ) -> None:
         self._host = host
         self._port = port
         self._storage_dir = Path(storage_dir)
         self._model_path = model_path
+        self._device = device
         self._wespeaker: WespeakerDeep | None = None
         self._server = None
 
@@ -46,7 +48,7 @@ class WSServer:
         加载模型后开始监听连接。此方法会阻塞直到服务停止。
         """
         self._storage_dir.mkdir(parents=True, exist_ok=True)
-        self._wespeaker = WespeakerDeep(model_path=self._model_path)
+        self._wespeaker = WespeakerDeep(model_path=self._model_path, device=self._device)
 
         self._server = await websockets.serve(
             self._handle_connection,

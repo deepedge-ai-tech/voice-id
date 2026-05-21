@@ -28,6 +28,12 @@ def _parse_args() -> argparse.Namespace:
         help="模型路径（None 使用内置模型）",
     )
     parser.add_argument(
+        "--device",
+        default="cpu",
+        choices=["cpu", "cuda"],
+        help="推理设备 (cpu/cuda)",
+    )
+    parser.add_argument(
         "--log-level",
         default="INFO",
         choices=["DEBUG", "INFO", "WARNING", "ERROR"],
@@ -48,6 +54,7 @@ def main() -> None:
         port=args.port,
         storage_dir=args.storage_dir,
         model_path=args.model_path,
+        device=args.device,
     )
     asyncio.run(server.start())
 

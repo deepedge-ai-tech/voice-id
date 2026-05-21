@@ -44,6 +44,7 @@ from dataclasses import dataclass
 from typing import Any
 
 import numpy as np
+import torch
 
 logger = logging.getLogger(__name__)
 
@@ -97,7 +98,7 @@ class WespeakerDeep:
         Args:
             model_path: 模型路径。None 使用内置 _models/vblinkf 模型，
                 本地路径则从本地加载。
-            device: 推理设备（官方模型内部处理，此参数保留以保持接口一致）。
+            device: 推理设备，"cpu" 或 "cuda"。设为 "cuda" 时自动使用 GPU。
             sample_rate: 采样率（官方模型固定 16000，此参数保留以保持接口一致）。
             config: DeepConfig 配置对象。None 时使用默认 DeepConfig()。
             package_pk_index: 内置声纹索引，优先级高于 config 中的设置。
@@ -107,6 +108,8 @@ class WespeakerDeep:
 
         model_dir = Path(__file__).parent / "_models" / "vblinkf"
         self._model = wespeaker.load_model(str(model_dir), dtype="float16")
+        if device == "cuda" and torch.cuda.is_available():
+            self._model.set_device("cuda")
         self._model_dir = str(model_dir.resolve())
         self.sample_rate = sample_rate
         self._deep_config = config if config is not None else DeepConfig()
