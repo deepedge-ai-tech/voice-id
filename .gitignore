@@ -9,8 +9,8 @@ wheels/
 # Virtual environments
 .venv
 
-# Model files
-models/
+# Model files (仅项目根目录，不影响 vendored _wespeaker/wespeaker/models/)
+/models/
 
 # Pickle files
 *.pkl
