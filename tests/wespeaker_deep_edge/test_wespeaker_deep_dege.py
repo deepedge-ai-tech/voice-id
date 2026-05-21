@@ -33,6 +33,15 @@ class TestDeepConfigDefaults:
         assert cfg.sim_threshold == 0.50
         assert cfg.package_pk_index == 3
 
+    def test_default_enable_asnorm(self) -> None:
+        assert DeepConfig().enable_asnorm is False
+
+    def test_default_asnorm_top_k(self) -> None:
+        assert DeepConfig().asnorm_top_k == 300
+
+    def test_default_asnorm_cohort_path(self) -> None:
+        assert DeepConfig().asnorm_cohort_path == "asset/cohort/cohort_embeddings.npy"
+
 
 # ============================================================================ #
 #  工具: 创建已 mock 的 WespeakerDeep 实例
@@ -59,6 +68,7 @@ def _make_deep(config: DeepConfig | None = None) -> WespeakerDeep:
     deep._template_matrix = None
     deep._template_names = []
     deep._template_norms = None
+    deep._cohort_cache = None
     return deep
 
 
@@ -407,3 +417,120 @@ class TestWespeakerDeepRecognizeMulti:
         assert called_pcm[0, 0].item() == 0.0
         assert called_pcm[0, 2].item() == -1.0
         assert called_pcm[0, 3].item() == pytest.approx(1.0, abs=1e-3)
+
+    def test_recognize_multi_returns_all_scores(self) -> None:
+        """recognize_multi 应返回包含 all_scores 的 RecognitionResult。"""
+        deep = self._make_loaded()
+        deep._model.extract_embedding.return_value = self.FAKE_TEST_TENSOR
+
+        with patch("pathlib.Path.is_file", return_value=True):
+            result = deep.recognize_multi("/tmp/test.wav")
+
+        assert result.all_scores is not None
+        assert isinstance(result.all_scores, dict)
+        assert "john" in result.all_scores
+        assert "frank" in result.all_scores
+        assert "michael" in result.all_scores
+        # best confidence matches the dict value for the recognized name
+        assert result.all_scores[result.name] == result.confidence
+
+    def test_recognize_multi_pcm_returns_all_scores(self) -> None:
+        """recognize_multi_pcm 应返回包含 all_scores 的 RecognitionResult。"""
+        deep = self._make_loaded()
+        deep._model.extract_embedding_from_pcm.return_value = self.FAKE_TEST_TENSOR
+
+        pcm = np.random.randint(-32768, 32767, (1, 16000), dtype=np.int16)
+        result = deep.recognize_multi_pcm(pcm, sample_rate=16000)
+
+        assert result.all_scores is not None
+        assert isinstance(result.all_scores, dict)
+        assert set(result.all_scores.keys()) == {"john", "frank", "michael"}
+
+    def test_recognize_multi_pcm_asnorm_no_cohort_returns_raw(self) -> None:
+        """AS-Norm 启用但 cohort 未加载时返回原始结果。"""
+        deep = self._make_loaded()
+        deep._deep_config.enable_asnorm = True
+        # _cohort_cache is None by default in _make_loaded
+        deep._model.extract_embedding_from_pcm.return_value = self.FAKE_TEST_TENSOR
+
+        pcm = np.random.randint(-32768, 32767, (1, 16000), dtype=np.int16)
+        result = deep.recognize_multi_pcm(pcm, sample_rate=16000)
+
+        assert result.all_scores is not None
+        assert isinstance(result, RecognitionResult)
+
+    def test_recognize_multi_pcm_asnorm_enabled_with_cohort(self) -> None:
+        """AS-Norm 启用且 cohort 已加载时应用规范化。"""
+        deep = self._make_loaded()
+        deep._deep_config.enable_asnorm = True
+        deep._model.extract_embedding_from_pcm.return_value = self.FAKE_TEST_TENSOR
+
+        # Create mock cohort cache with precomputed stats
+        num_cohort = 500
+        mock_cache = MagicMock()
+        mock_cache._enroll_mu = np.array([0.5, 0.5, 0.5], dtype=np.float32)
+        mock_cache._enroll_sigma = np.array([0.1, 0.1, 0.1], dtype=np.float32)
+        norm_scores = np.array([0.6, 0.4, 0.3], dtype=np.float32)
+        mock_cache.apply.return_value = (norm_scores, mock_cache._enroll_mu, mock_cache._enroll_sigma)
+        deep._cohort_cache = mock_cache
+
+        pcm = np.random.randint(-32768, 32767, (1, 16000), dtype=np.int16)
+        result = deep.recognize_multi_pcm(pcm, sample_rate=16000)
+
+        assert isinstance(result, RecognitionResult)
+        assert isinstance(result.is_recognized, bool)
+        assert isinstance(result.confidence, float)
+        assert isinstance(result.name, str)
+        assert result.all_scores is not None
+        assert set(result.all_scores.keys()) == {"john", "frank", "michael"}
+
+
+# ============================================================================ #
+#  WespeakerDeep Tests — load_cohort()
+# ============================================================================ #
+
+
+class TestWespeakerDeepLoadCohort:
+    """load_cohort() 测试。"""
+
+    def test_load_cohort_without_asnorm_does_nothing(self) -> None:
+        """enable_asnorm=False 时 load_cohort() 不执行任何操作。"""
+        deep = _make_deep()  # enable_asnorm=False by default
+
+        with patch(
+            "src.wespeaker_deep_edge.wespeaker_deep_dege.CohortCache.load",
+        ) as mock_load:
+            deep.load_cohort()
+            mock_load.assert_not_called()
+
+        assert deep._cohort_cache is None
+
+    def test_load_cohort_file_not_found(self) -> None:
+        """文件不存在时应记录警告并设 _cohort_cache = None。"""
+        cfg = DeepConfig(enable_asnorm=True)
+        deep = _make_deep(cfg)
+
+        with patch(
+            "src.wespeaker_deep_edge.wespeaker_deep_dege.CohortCache.load",
+            side_effect=FileNotFoundError("Not found"),
+        ):
+            deep.load_cohort()
+
+        assert deep._cohort_cache is None
+
+    def test_load_cohort_success(self) -> None:
+        """正常加载应设置 _cohort_cache。"""
+        cfg = DeepConfig(enable_asnorm=True)
+        deep = _make_deep(cfg)
+
+        mock_cache = MagicMock()
+        mock_cache.size = 500
+
+        with patch(
+            "src.wespeaker_deep_edge.wespeaker_deep_dege.CohortCache.load",
+            return_value=mock_cache,
+        ):
+            deep.load_cohort()
+
+        assert deep._cohort_cache is not None
+        assert deep._cohort_cache.size == 500

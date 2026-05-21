@@ -29,6 +29,8 @@ from typing import Any, NamedTuple
 import numpy as np
 import torch
 
+from .asnorm import CohortCache
+
 logger = logging.getLogger(__name__)
 
 
@@ -49,6 +51,7 @@ class RecognitionResult(NamedTuple):
     is_recognized: bool
     confidence: float
     name: str
+    all_scores: dict | None = None
 
 
 # --------------------------------------------------------------------------- #
@@ -67,6 +70,11 @@ class DeepConfig:
 
     sim_threshold: float = 0.70
     package_pk_index: int | None = None
+
+    # AS-Norm settings
+    enable_asnorm: bool = False
+    asnorm_top_k: int = 300
+    asnorm_cohort_path: str = "asset/cohort/cohort_embeddings.npy"
 
 
 # --------------------------------------------------------------------------- #
@@ -144,6 +152,8 @@ class WespeakerDeep:
         self._template_norms: np.ndarray | None = None
         if package_pk_index is not None:
             self._deep_config.package_pk_index = package_pk_index
+        # AS-Norm cohort cache
+        self._cohort_cache: CohortCache | None = None
 
     @property
     def deep_config(self) -> DeepConfig:
@@ -340,11 +350,41 @@ class WespeakerDeep:
 
         logger.info("Loaded %d templates: %s", len(names), names)
 
+        self._precompute_cohort_stats_if_needed()
+
     def clear_templates(self) -> None:
         """清空声纹模板缓存。"""
         self._template_matrix = None
         self._template_names = []
         self._template_norms = None
+
+    def load_cohort(self, path: str | Path | None = None) -> None:
+        """Load AS-Norm cohort embeddings from file.
+
+        Args:
+            path: Path to cohort .npy file. None uses config.asnorm_cohort_path.
+        """
+        if not self._deep_config.enable_asnorm:
+            return
+        path = Path(path or self._deep_config.asnorm_cohort_path)
+        try:
+            self._cohort_cache = CohortCache.load(path)
+            logger.info("Loaded cohort: %s (%d speakers)", path, self._cohort_cache.size)
+        except FileNotFoundError:
+            logger.warning("Cohort file not found: %s. AS-Norm disabled.", path)
+            self._cohort_cache = None
+
+        # If templates are already loaded, precompute stats now
+        self._precompute_cohort_stats_if_needed()
+
+    def _precompute_cohort_stats_if_needed(self) -> None:
+        """Precompute enroll-side cohort stats after templates are loaded."""
+        if self._cohort_cache is not None and self._template_matrix is not None:
+            self._cohort_cache.precompute_enroll_stats(
+                self._template_matrix,
+                self._template_names,
+                top_k=self._deep_config.asnorm_top_k,
+            )
 
     # ------------------------------------------------------------------ #
     #  批量识别（内部 + 公开）
@@ -379,10 +419,13 @@ class WespeakerDeep:
             self._template_names[best_pos], scores[best_pos], threshold,
         )
 
+        scores_dict = dict(zip(self._template_names, [round(float(s), 4) for s in scores]))
+
         return RecognitionResult(
             is_recognized=bool(scores[best_pos] >= threshold),
             confidence=round(float(scores[best_pos]), 4),
             name=self._template_names[best_pos],
+            all_scores=scores_dict,
         )
 
     def recognize_multi(self, audio_path: str | Path) -> RecognitionResult:
@@ -442,4 +485,37 @@ class WespeakerDeep:
         if test_emb is None:
             raise ValueError("音频中未检测到有效语音")
 
-        return self._match_templates(test_emb)
+        # Step 1: get raw matching result (now includes all_scores)
+        raw_result = self._match_templates(test_emb)
+
+        # Step 2: apply AS-Norm if enabled and cohort is ready
+        if (
+            self._deep_config.enable_asnorm
+            and self._cohort_cache is not None
+            and self._cohort_cache._enroll_mu is not None
+            and raw_result.all_scores is not None
+        ):
+            test_emb_np = np.asarray(test_emb.cpu().numpy(), dtype=np.float32)
+            k = self._deep_config.asnorm_top_k
+            norm_scores, _, _ = self._cohort_cache.apply(test_emb_np, top_k=k)
+
+            best_idx = int(np.argmax(norm_scores))
+            names = self._template_names
+            threshold = self._deep_config.sim_threshold
+
+            logger.debug(
+                "AS-Norm applied: raw best=%.4f, norm best=%.4f",
+                raw_result.confidence, norm_scores[best_idx],
+            )
+
+            return RecognitionResult(
+                is_recognized=bool(norm_scores[best_idx] >= threshold),
+                confidence=round(float(norm_scores[best_idx]), 4),
+                name=names[best_idx],
+                all_scores={
+                    name: round(float(norm_scores[i]), 4)
+                    for i, name in enumerate(names)
+                },
+            )
+
+        return raw_result
