@@ -107,13 +107,17 @@ class WespeakerDeep:
 
 
         model_dir = Path(__file__).parent / "_models" / "vblinkf"
-        self._model = wespeaker.load_model(str(model_dir), dtype="float16")
-        if device == "cuda" and torch.cuda.is_available():
+        use_cuda = device == "cuda" and torch.cuda.is_available()
+        self._model = wespeaker.load_model(
+            str(model_dir),
+            dtype="float16" if use_cuda else "float32",
+        )
+        if use_cuda:
             self._model.set_device("cuda")
-            logger.info("Model loaded on GPU (CUDA)")
+            logger.info("Model loaded on GPU (float16)")
         else:
             reason = "device not set to cuda" if device != "cuda" else "CUDA not available"
-            logger.info("Model loaded on CPU (%s)", reason)
+            logger.info("Model loaded on CPU (float32, %s)", reason)
         self._model_dir = str(model_dir.resolve())
         self.sample_rate = sample_rate
         self._deep_config = config if config is not None else DeepConfig()
