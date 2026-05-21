@@ -14,18 +14,44 @@ WeSpeaker 声纹识别工具 — 独立的声纹注册与识别 CLI 工具。
 
 ## 安装
 
-```bash
-# 从源码安装（完整安装，含服务端推理）
-pip install .
+### 从 PyPI（已发布）
 
-# 或使用 uv
-uv pip install .
+```bash
+# 完整安装（含服务端推理）
+pip install wespeaker-deep-edge
 
 # 仅安装客户端 SDK（轻量，无需 torch）
 pip install "wespeaker-deep-edge[client]"
 
 # 仅安装服务端
 pip install "wespeaker-deep-edge[server]"
+```
+
+### 从 GitHub 直接安装
+
+```bash
+# 完整安装（最新 main 分支）
+pip install git+https://github.com/deepedge-ai-tech/voice-id.git
+
+# 仅客户端 SDK
+pip install "wespeaker-deep-edge[client] @ git+https://github.com/deepedge-ai-tech/voice-id.git"
+
+# 仅服务端
+pip install "wespeaker-deep-edge[server] @ git+https://github.com/deepedge-ai-tech/voice-id.git"
+
+# 指定版本 tag
+pip install git+https://github.com/deepedge-ai-tech/voice-id.git@v0.1.23
+
+# 或使用 uv
+uv pip install git+https://github.com/deepedge-ai-tech/voice-id.git
+```
+
+### 从源码安装
+
+```bash
+git clone https://github.com/deepedge-ai-tech/voice-id.git
+cd voice-id
+pip install .
 ```
 
 ## 快速开始
