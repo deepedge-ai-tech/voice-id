@@ -27,6 +27,8 @@ import seaborn as sns
 import wespeaker_deep_edge  # 将 vendored _wespeaker/ 加入 sys.path
 import wespeaker
 
+from src.wespeaker_deep_edge.asnorm import CohortCache
+
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
 
 plt.rcParams["font.sans-serif"] = ["Arial Unicode MS", "SimHei"]
@@ -264,8 +266,16 @@ def recognize(
     test_files_map: dict[str, list[Path]],
     enroll_embs: dict[str, np.ndarray],
     active_people: list[str],
+    cohort: CohortCache | None = None,
 ) -> dict[str, list[tuple[str, list[float]]]]:
     """Extract test embeddings and compute per-file similarity against all enrollments.
+
+    Args:
+        model: Loaded wespeaker model.
+        test_files_map: Dict mapping test speaker to list of WAV paths.
+        enroll_embs: Dict mapping enrollment speaker name to embedding.
+        active_people: Ordered list of active speakers.
+        cohort: Optional CohortCache for AS-Norm normalization.
 
     Returns:
         Dict mapping test speaker to list of (filename, [scores]) tuples,
@@ -295,8 +305,19 @@ def recognize(
     for tp in valid:
         entries = []
         for fname, temb in zip(test_files_map[tp], test_embs[tp]):
-            scores = [cosine_similarity(temb, enroll_embs[ep]) for ep in valid]
-            entries.append((fname.name, scores))
+            raw_scores = [cosine_similarity(temb, enroll_embs[ep]) for ep in valid]
+
+            if cohort is not None and cohort._enroll_mu is not None:
+                temb_np = (
+                    temb.cpu().numpy().astype(np.float32)
+                    if hasattr(temb, "cpu")
+                    else np.asarray(temb, dtype=np.float32)
+                )
+                norm_scores, _, _ = cohort.apply(temb_np, top_k=300)
+                entries.append((fname.name, norm_scores.tolist()))
+            else:
+                entries.append((fname.name, raw_scores))
+
         per_file_results[tp] = entries
 
     return per_file_results
@@ -311,9 +332,12 @@ def cross_test(
     threshold: float,
     output_dir: Path | None = None,
     verbose: bool = False,
+    asnorm: bool = False,
 ) -> None:
     print("=" * 60)
     print("声纹交叉测试 (wespeaker vblinkf + VAD)")
+    if asnorm:
+        print("  AS-Norm 归一化已启用")
     print("=" * 60)
 
     # 1. Load model
@@ -348,11 +372,27 @@ def cross_test(
     # 3. Enroll
     print("\n[3/4] 注册...")
     enroll_embs = enroll(model, enroll_files, active_people)
+    active_people = [p for p in active_people if p in enroll_embs]
+
+    # 3b. AS-Norm cohort setup (optional)
+    cohort: CohortCache | None = None
+    if asnorm:
+        cohort_path = "asset/cohort/cohort_embeddings.npy"
+        if Path(cohort_path).is_file():
+            cohort = CohortCache.load(cohort_path)
+            enroll_matrix = np.stack([
+                e.cpu().numpy().astype(np.float32) if hasattr(e, "cpu")
+                else np.asarray(e, dtype=np.float32)
+                for e in (enroll_embs[p] for p in active_people)
+            ])
+            cohort.precompute_enroll_stats(enroll_matrix, enroll_names=active_people, top_k=300)
+            print(f"  AS-Norm cohort 已加载: {cohort_path} ({cohort.size} speakers)")
+        else:
+            print(f"  WARNING: cohort 文件不存在: {cohort_path}，AS-Norm 跳过")
 
     # 4. Recognize (extract test embeddings + compute similarity)
-    active_people = [p for p in active_people if p in enroll_embs]
     print(f"\n[4/4] 识别 ({len(active_people)} 人)...")
-    per_file_results = recognize(model, test_files_map, enroll_embs, active_people)
+    per_file_results = recognize(model, test_files_map, enroll_embs, active_people, cohort=cohort)
     active_people = list(per_file_results.keys())
 
     N = len(active_people)
@@ -508,7 +548,8 @@ def cross_test(
     # 9. Summary line
     print("\n" + "-" * 60)
     print(f"SUMMARY: 同人={same_mean:.1f}%, 异人={diff_mean:.1f}%, "
-          f"差距={gap:.1f}%, FA={n_fa}, FR={n_fr}")
+          f"差距={gap:.1f}%, FA={n_fa}, FR={n_fr}, "
+          f"asnorm={'on' if asnorm else 'off'}")
     print("-" * 60)
 
 
@@ -533,6 +574,10 @@ def main() -> None:
         "--verbose", "-v", action="store_true",
         help="详细输出模式",
     )
+    parser.add_argument(
+        "--asnorm", action="store_true",
+        help="启用 AS-Norm 分数归一化",
+    )
     args = parser.parse_args()
 
     # Verify asset files exist
@@ -546,7 +591,7 @@ def main() -> None:
             sys.exit(1)
 
     output_path = Path(args.output_dir) if args.output_dir else None
-    cross_test(args.threshold, output_path, args.verbose)
+    cross_test(args.threshold, output_path, args.verbose, args.asnorm)
 
 
 if __name__ == "__main__":
