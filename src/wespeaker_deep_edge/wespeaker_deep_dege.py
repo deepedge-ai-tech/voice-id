@@ -110,6 +110,10 @@ class WespeakerDeep:
         self._model = wespeaker.load_model(str(model_dir), dtype="float16")
         if device == "cuda" and torch.cuda.is_available():
             self._model.set_device("cuda")
+            logger.info("Model loaded on GPU (CUDA)")
+        else:
+            reason = "device not set to cuda" if device != "cuda" else "CUDA not available"
+            logger.info("Model loaded on CPU (%s)", reason)
         self._model_dir = str(model_dir.resolve())
         self.sample_rate = sample_rate
         self._deep_config = config if config is not None else DeepConfig()
