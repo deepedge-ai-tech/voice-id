@@ -121,6 +121,8 @@ class WespeakerDeep:
         self._model_dir = str(model_dir.resolve())
         self.sample_rate = sample_rate
         self._deep_config = config if config is not None else DeepConfig()
+        # 模板缓存: {index_or_name: (label, embedding)}
+        self._templates: dict[int | str, tuple[str, np.ndarray]] = {}
         if package_pk_index is not None:
             self._deep_config.package_pk_index = package_pk_index
 
@@ -278,26 +280,64 @@ class WespeakerDeep:
             "threshold": threshold,
         }
 
+    def load_templates(
+        self,
+        indices: list[int] | None = None,
+        files: dict[str, str | Path] | None = None,
+    ) -> None:
+        """加载声纹模板到内存缓存。
+
+        支持内置声纹（通过 index）和自定义 .pkl 文件。
+        加载后可在 ``recognize_multi()`` 中反复使用，避免每次从磁盘读取。
+
+        Args:
+            indices: 内置声纹索引列表，如 [0, 1, 2]。
+            files: 自定义声纹文件，如 {"target": "path/to/voice.pkl"}。
+                键名为识别结果中返回的 name。
+        """
+        from ._voiceprints import get_voiceprint_path, get_voiceprint_name
+
+        if indices:
+            for idx in indices:
+                ref_data = self.load(get_voiceprint_path(idx))
+                self._templates[idx] = (get_voiceprint_name(idx), ref_data.astype(np.float32))
+
+        if files:
+            for name, path in files.items():
+                ref_data = self.load(str(path))
+                self._templates[name] = (name, ref_data.astype(np.float32))
+
+        logger.info("Loaded %d templates", len(self._templates))
+
+    def clear_templates(self) -> None:
+        """清空声纹模板缓存。"""
+        self._templates.clear()
+
     def recognize_multi(
         self,
         audio_path: str | Path,
-        indices: list[int] | None = None,
     ) -> dict[str, Any]:
-        """将音频与多个内置声纹比对，返回最佳匹配。
+        """将音频与已缓存的声纹模板比对，返回最佳匹配。
 
-        使用 numpy 矩阵批量计算余弦相似度，避免逐人遍历。
-        所有模板堆叠为 [N, 256] 矩阵，一次 matmul 得到所有分数。
+        使用 numpy 矩阵批量计算余弦相似度。
+        需先调用 ``load_templates()`` 加载模板。
 
         Args:
             audio_path: 待测试音频文件路径。
-            indices: 内置声纹索引列表，如 [0, 1, 2]。
-                None 时遍历所有内置声纹 (0-7)。
 
         Returns:
             {"is_recognized": bool, "confidence": float, "name": str,
-             "index": int, "threshold": float}
+             "index": int | str, "threshold": float}
+            index 为内置声纹索引 (int) 或自定义声纹名称 (str)。
         """
-        from ._voiceprints import get_voiceprint_path, get_voiceprint_name, _PEOPLE
+        if not self._templates:
+            return {
+                "is_recognized": False,
+                "confidence": 0.0,
+                "name": "",
+                "index": -1,
+                "error": "模板为空，请先调用 load_templates()",
+            }
 
         audio_path = str(Path(audio_path))
         if not Path(audio_path).is_file():
@@ -309,9 +349,7 @@ class WespeakerDeep:
                 "error": f"文件不存在: {audio_path}",
             }
 
-        indices = indices if indices is not None else list(range(len(_PEOPLE)))
-
-        # ---- 只提取一次音频 embedding ----
+        # ---- 提取音频 embedding ----
         test_emb = self._model.extract_embedding(audio_path)
         if test_emb is None:
             return {
@@ -322,15 +360,10 @@ class WespeakerDeep:
                 "error": "音频中未检测到有效语音",
             }
 
-        # ---- 批量矩阵计算 cosine similarity ----
-        emb_list = []
-        names = []
-        for idx in indices:
-            ref_data = self.load(get_voiceprint_path(idx))
-            emb_list.append(ref_data.astype(np.float32))
-            names.append(get_voiceprint_name(idx))
-
-        emb_matrix = np.stack(emb_list)  # [N, 256]
+        # ---- 堆叠模板为矩阵，一次 matmul ----
+        indices = list(self._templates.keys())
+        names = [self._templates[idx][0] for idx in indices]
+        emb_matrix = np.stack([self._templates[idx][1] for idx in indices])  # [N, 256]
         audio_vec = np.asarray(test_emb.cpu().numpy(), dtype=np.float32).reshape(1, -1)  # [1, 256]
 
         norms = np.linalg.norm(emb_matrix, axis=1) * np.linalg.norm(audio_vec)
@@ -341,8 +374,8 @@ class WespeakerDeep:
         threshold = self._deep_config.sim_threshold
 
         logger.debug(
-            "Recognize multi: indices=%s, best=%s (idx=%d, score=%.4f)",
-            indices, names[best_pos], indices[best_pos], scores[best_pos],
+            "Recognize multi: best=%s (idx=%d, score=%.4f)",
+            names[best_pos], indices[best_pos], scores[best_pos],
         )
 
         return {

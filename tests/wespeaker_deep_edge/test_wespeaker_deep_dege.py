@@ -56,6 +56,7 @@ def _make_deep(config: DeepConfig | None = None) -> WespeakerDeep:
     deep._model = _make_mock_model()
     deep.sample_rate = 16000
     deep._deep_config = config if config is not None else DeepConfig()
+    deep._templates = {}
     return deep
 
 
@@ -333,39 +334,54 @@ class TestWespeakerDeepRecognize:
 
 
 class TestWespeakerDeepRecognizeMulti:
-    """WespeakerDeep.recognize_multi 测试。"""
+    """WespeakerDeep 双阶段多人声纹测试。"""
 
-    FAKE_EMBED_1 = np.random.randn(256).astype(np.float32)
-    FAKE_EMBED_2 = np.random.randn(256).astype(np.float32)
-    FAKE_EMBED_3 = np.random.randn(256).astype(np.float32)
-    FAKE_TEST_EMB = np.random.randn(256).astype(np.float32)
-    FAKE_TEST_TENSOR = torch.from_numpy(FAKE_TEST_EMB)
+    FAKE_EMBED = np.random.randn(256).astype(np.float32)
+    FAKE_TEST_TENSOR = torch.from_numpy(np.random.randn(256).astype(np.float32))
+
+    @staticmethod
+    def _make_loaded() -> WespeakerDeep:
+        """创建已加载模板的 WespeakerDeep 实例。"""
+        deep = _make_deep()
+        deep._templates = {
+            0: ("john", np.random.randn(256).astype(np.float32)),
+            1: ("frank", np.random.randn(256).astype(np.float32)),
+            2: ("michael", np.random.randn(256).astype(np.float32)),
+        }
+        return deep
+
+    def test_load_templates_should_populate_cache(self) -> None:
+        """load_templates 应填充模板缓存。"""
+        deep = self._make_loaded()
+
+        assert len(deep._templates) == 3
+        assert deep._templates[0][0] == "john"
+
+    def test_recognize_multi_empty_cache_should_return_error(self) -> None:
+        """未加载模板时调用应返回 error。"""
+        deep = _make_deep()
+        result = deep.recognize_multi("/tmp/test.wav")
+
+        assert result["is_recognized"] is False
+        assert "error" in result
 
     def test_recognize_multi_nonexistent_audio_should_return_error(self) -> None:
-        """传入不存在的音频应返回 error。"""
-        deep = _make_deep()
+        """不存在的音频应返回 error。"""
+        deep = self._make_loaded()
 
         with patch("pathlib.Path.is_file", return_value=False):
-            result = deep.recognize_multi("/nonexistent.wav", [0, 1])
+            result = deep.recognize_multi("/nonexistent.wav")
 
         assert result["is_recognized"] is False
         assert "error" in result
 
     def test_recognize_multi_returns_best_match(self) -> None:
-        """应在多个声纹中返回最佳匹配。"""
-        deep = _make_deep()
+        """应在多个模板中返回最佳匹配。"""
+        deep = self._make_loaded()
         deep._model.extract_embedding.return_value = self.FAKE_TEST_TENSOR
 
-        embeds = [self.FAKE_EMBED_1, self.FAKE_EMBED_2, self.FAKE_EMBED_3]
-        names = ["john", "frank", "michael"]
-
-        with (
-            patch("pathlib.Path.is_file", return_value=True),
-            patch("src.wespeaker_deep_edge._voiceprints.get_voiceprint_path"),
-            patch("src.wespeaker_deep_edge._voiceprints.get_voiceprint_name", side_effect=lambda i: names[i]),
-            patch.object(WespeakerDeep, "load", side_effect=lambda _: embeds.pop(0)),
-        ):
-            result = deep.recognize_multi("/tmp/test.wav", [0, 1, 2])
+        with patch("pathlib.Path.is_file", return_value=True):
+            result = deep.recognize_multi("/tmp/test.wav")
 
         assert set(result.keys()) == {"is_recognized", "confidence", "name", "index", "threshold"}
         assert result["index"] in [0, 1, 2]
