@@ -57,7 +57,7 @@ def _normalize_scores(scores: np.ndarray) -> np.ndarray:
     Returns:
         Scores mapped to [0, 1].
     """
-    return (scores.astype(np.float64) + 1.0) / 2.0
+    return (scores + 1.0) / 2.0
 
 
 # --------------------------------------------------------------------------- #
@@ -227,8 +227,7 @@ class CohortCache:
         self._enroll_mu: np.ndarray | None = None
         self._enroll_sigma: np.ndarray | None = None
         self._enroll_names: list[str] | None = None
-        self._enroll_top_k: int | None = None
-
+        
     # ------------------------------------------------------------------ #
     #  Persistence
     # ------------------------------------------------------------------ #
@@ -356,8 +355,7 @@ class CohortCache:
         self._enroll_mu = enroll_mu
         self._enroll_sigma = enroll_sigma
         self._enroll_names = enroll_names
-        self._enroll_top_k = top_k
-
+        
         return enroll_mu, enroll_sigma
 
     def apply(
@@ -395,19 +393,19 @@ class CohortCache:
             )
 
         # Normalize test embedding.
-        test_norm = test_emb.astype(np.float64) / (
+        test_norm = test_emb.astype(np.float32) / (
             np.linalg.norm(test_emb) + 1e-10
         )
 
         # --- Test-side statistics -------------------------------------- #
-        test_cohort_sim = np.dot(self._norms.astype(np.float64), test_norm)
+        test_cohort_sim = np.dot(self._norms, test_norm)
         test_cohort_sim_norm = _normalize_scores(test_cohort_sim)
         mu_test, sigma_test = top_k_mean_std(test_cohort_sim_norm, top_k)
         sigma_test = max(sigma_test, 1e-8)
 
         # --- Raw test-enroll similarities ------------------------------ #
-        enroll_norm_f64 = self._enroll_norm.astype(np.float64)
-        raw_scores = np.dot(enroll_norm_f64, test_norm)  # (N,)
+        
+        raw_scores = np.dot(self._enroll_norm, test_norm)  # (N,)
         raw_scores_norm = _normalize_scores(raw_scores)
 
         # --- Apply AS-Norm formula (vectorised) ------------------------ #
