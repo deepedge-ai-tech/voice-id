@@ -12,7 +12,7 @@ import numpy as np
 import pytest
 import torch
 
-from src.wespeaker_deep_edge.wespeaker_deep_dege import DeepConfig, WespeakerDeep
+from src.wespeaker_deep_edge.wespeaker_deep_dege import DeepConfig, RecognitionResult, WespeakerDeep
 
 # ============================================================================ #
 #  DeepConfig Tests
@@ -56,7 +56,9 @@ def _make_deep(config: DeepConfig | None = None) -> WespeakerDeep:
     deep._model = _make_mock_model()
     deep.sample_rate = 16000
     deep._deep_config = config if config is not None else DeepConfig()
-    deep._templates = {}
+    deep._template_matrix = None
+    deep._template_names = []
+    deep._template_norms = None
     return deep
 
 
@@ -336,54 +338,72 @@ class TestWespeakerDeepRecognize:
 class TestWespeakerDeepRecognizeMulti:
     """WespeakerDeep 双阶段多人声纹测试。"""
 
-    FAKE_EMBED = np.random.randn(256).astype(np.float32)
     FAKE_TEST_TENSOR = torch.from_numpy(np.random.randn(256).astype(np.float32))
 
     @staticmethod
     def _make_loaded() -> WespeakerDeep:
-        """创建已加载模板的 WespeakerDeep 实例。"""
+        """创建已预载模板的 WespeakerDeep 实例。"""
         deep = _make_deep()
-        deep._templates = {
-            0: ("john", np.random.randn(256).astype(np.float32)),
-            1: ("frank", np.random.randn(256).astype(np.float32)),
-            2: ("michael", np.random.randn(256).astype(np.float32)),
-        }
+        embs = [
+            np.random.randn(256).astype(np.float32),
+            np.random.randn(256).astype(np.float32),
+            np.random.randn(256).astype(np.float32),
+        ]
+        deep._template_matrix = np.stack(embs)
+        deep._template_names = ["john", "frank", "michael"]
+        deep._template_norms = np.linalg.norm(deep._template_matrix, axis=1)
         return deep
 
-    def test_load_templates_should_populate_cache(self) -> None:
-        """load_templates 应填充模板缓存。"""
-        deep = self._make_loaded()
-
-        assert len(deep._templates) == 3
-        assert deep._templates[0][0] == "john"
-
-    def test_recognize_multi_empty_cache_should_return_error(self) -> None:
-        """未加载模板时调用应返回 error。"""
+    def test_empty_cache_should_raise(self) -> None:
+        """未加载模板时调用应抛 RuntimeError。"""
         deep = _make_deep()
-        result = deep.recognize_multi("/tmp/test.wav")
+        with (
+            patch("pathlib.Path.is_file", return_value=True),
+        ):
+            with pytest.raises(RuntimeError, match="模板为空"):
+                deep.recognize_multi("/tmp/test.wav")
 
-        assert result["is_recognized"] is False
-        assert "error" in result
-
-    def test_recognize_multi_nonexistent_audio_should_return_error(self) -> None:
-        """不存在的音频应返回 error。"""
+    def test_nonexistent_audio_should_raise(self) -> None:
+        """不存在的音频应抛 FileNotFoundError。"""
         deep = self._make_loaded()
+        with pytest.raises(FileNotFoundError, match="文件不存在"):
+            deep.recognize_multi("/nonexistent.wav")
 
-        with patch("pathlib.Path.is_file", return_value=False):
-            result = deep.recognize_multi("/nonexistent.wav")
-
-        assert result["is_recognized"] is False
-        assert "error" in result
-
-    def test_recognize_multi_returns_best_match(self) -> None:
-        """应在多个模板中返回最佳匹配。"""
+    def test_recognize_multi_returns_recognition_result(self) -> None:
+        """正常识别应返回 RecognitionResult。"""
         deep = self._make_loaded()
         deep._model.extract_embedding.return_value = self.FAKE_TEST_TENSOR
 
         with patch("pathlib.Path.is_file", return_value=True):
             result = deep.recognize_multi("/tmp/test.wav")
 
-        assert set(result.keys()) == {"is_recognized", "confidence", "name", "index", "threshold"}
-        assert result["index"] in [0, 1, 2]
-        assert isinstance(result["name"], str)
-        assert isinstance(result["confidence"], float)
+        assert isinstance(result, RecognitionResult)
+        assert isinstance(result.name, str)
+        assert isinstance(result.confidence, float)
+        assert isinstance(result.is_recognized, bool)
+
+    def test_recognize_multi_pcm_returns_recognition_result(self) -> None:
+        """PCM 识别应返回 RecognitionResult。"""
+        deep = self._make_loaded()
+        deep._model.extract_embedding_from_pcm.return_value = self.FAKE_TEST_TENSOR
+
+        pcm = np.random.randint(-32768, 32767, (1, 16000), dtype=np.int16)
+        result = deep.recognize_multi_pcm(pcm, sample_rate=16000)
+
+        assert isinstance(result, RecognitionResult)
+        assert isinstance(result.name, str)
+
+    def test_recognize_multi_pcm_int16_conversion(self) -> None:
+        """int16 PCM 应被正确归一化。"""
+        deep = self._make_loaded()
+        deep._model.extract_embedding_from_pcm.return_value = self.FAKE_TEST_TENSOR
+        mock = deep._model.extract_embedding_from_pcm
+
+        pcm = np.array([[0, 16384, -32768, 32767]], dtype=np.int16)
+        deep.recognize_multi_pcm(pcm, 16000)
+
+        called_pcm = mock.call_args[0][0]
+        assert called_pcm.dtype == torch.float32
+        assert called_pcm[0, 0].item() == 0.0
+        assert called_pcm[0, 2].item() == -1.0
+        assert called_pcm[0, 3].item() == pytest.approx(1.0, abs=1e-3)

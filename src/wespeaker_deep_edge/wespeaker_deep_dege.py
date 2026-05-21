@@ -41,12 +41,31 @@ if 'wespeaker' not in sys.modules:
 import logging
 import pickle
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NamedTuple
 
 import numpy as np
 import torch
 
 logger = logging.getLogger(__name__)
+
+
+# --------------------------------------------------------------------------- #
+#  RecognitionResult — 识别结果
+# --------------------------------------------------------------------------- #
+
+
+class RecognitionResult(NamedTuple):
+    """声纹识别结果。
+
+    Attributes:
+        is_recognized: 是否匹配（置信度 ≥ 阈值）。
+        confidence: 余弦相似度 [0, 1]。
+        name: 匹配的说话人名称。
+    """
+
+    is_recognized: bool
+    confidence: float
+    name: str
 
 
 # --------------------------------------------------------------------------- #
@@ -121,8 +140,10 @@ class WespeakerDeep:
         self._model_dir = str(model_dir.resolve())
         self.sample_rate = sample_rate
         self._deep_config = config if config is not None else DeepConfig()
-        # 模板缓存: {index_or_name: (label, embedding)}
-        self._templates: dict[int | str, tuple[str, np.ndarray]] = {}
+        # 预计算模板矩阵: [N, 256] + 名称列表 + 行 norms
+        self._template_matrix: np.ndarray | None = None
+        self._template_names: list[str] = []
+        self._template_norms: np.ndarray | None = None
         if package_pk_index is not None:
             self._deep_config.package_pk_index = package_pk_index
 
@@ -285,103 +306,142 @@ class WespeakerDeep:
         indices: list[int] | None = None,
         files: dict[str, str | Path] | None = None,
     ) -> None:
-        """加载声纹模板到内存缓存。
+        """加载声纹模板到内存，预计算匹配矩阵。
 
         支持内置声纹（通过 index）和自定义 .pkl 文件。
-        加载后可在 ``recognize_multi()`` 中反复使用，避免每次从磁盘读取。
+        模板被堆叠为 [N, 256] 矩阵并预计算 L2 norms，
+        后续 ``recognize_multi()`` / ``recognize_multi_pcm()`` 直接做矩阵乘法。
 
         Args:
             indices: 内置声纹索引列表，如 [0, 1, 2]。
             files: 自定义声纹文件，如 {"target": "path/to/voice.pkl"}。
-                键名为识别结果中返回的 name。
         """
         from ._voiceprints import get_voiceprint_path, get_voiceprint_name
+
+        embs: list[np.ndarray] = []
+        names: list[str] = []
 
         if indices:
             for idx in indices:
                 ref_data = self.load(get_voiceprint_path(idx))
-                self._templates[idx] = (get_voiceprint_name(idx), ref_data.astype(np.float32))
+                embs.append(ref_data.astype(np.float32))
+                names.append(get_voiceprint_name(idx))
 
         if files:
             for name, path in files.items():
                 ref_data = self.load(str(path))
-                self._templates[name] = (name, ref_data.astype(np.float32))
+                embs.append(ref_data.astype(np.float32))
+                names.append(name)
 
-        logger.info("Loaded %d templates", len(self._templates))
+        if not embs:
+            raise ValueError("未提供任何声纹模板")
+
+        self._template_matrix = np.stack(embs)  # [N, 256]
+        self._template_names = names
+        self._template_norms = np.linalg.norm(self._template_matrix, axis=1)
+
+        logger.info("Loaded %d templates: %s", len(names), names)
 
     def clear_templates(self) -> None:
         """清空声纹模板缓存。"""
-        self._templates.clear()
+        self._template_matrix = None
+        self._template_names = []
+        self._template_norms = None
 
-    def recognize_multi(
-        self,
-        audio_path: str | Path,
-    ) -> dict[str, Any]:
-        """将音频与已缓存的声纹模板比对，返回最佳匹配。
+    # ------------------------------------------------------------------ #
+    #  批量识别（内部 + 公开）
+    # ------------------------------------------------------------------ #
 
-        使用 numpy 矩阵批量计算余弦相似度。
-        需先调用 ``load_templates()`` 加载模板。
+    def _match_templates(self, test_emb: torch.Tensor) -> RecognitionResult:
+        """内部：与已缓存的模板做批量余弦相似度，返回最佳匹配。
 
         Args:
-            audio_path: 待测试音频文件路径。
+            test_emb: 测试音频的 embedding tensor。
 
         Returns:
-            {"is_recognized": bool, "confidence": float, "name": str,
-             "index": int | str, "threshold": float}
-            index 为内置声纹索引 (int) 或自定义声纹名称 (str)。
+            RecognitionResult。
+
+        Raises:
+            RuntimeError: 模板缓存为空。
         """
-        if not self._templates:
-            return {
-                "is_recognized": False,
-                "confidence": 0.0,
-                "name": "",
-                "index": -1,
-                "error": "模板为空，请先调用 load_templates()",
-            }
+        if self._template_matrix is None:
+            raise RuntimeError("模板为空，请先调用 load_templates()")
 
-        audio_path = str(Path(audio_path))
-        if not Path(audio_path).is_file():
-            return {
-                "is_recognized": False,
-                "confidence": 0.0,
-                "name": "",
-                "index": -1,
-                "error": f"文件不存在: {audio_path}",
-            }
+        audio_vec = np.asarray(test_emb.cpu().numpy(), dtype=np.float32).reshape(1, -1)
+        audio_norm = np.linalg.norm(audio_vec)
 
-        # ---- 提取音频 embedding ----
-        test_emb = self._model.extract_embedding(audio_path)
-        if test_emb is None:
-            return {
-                "is_recognized": False,
-                "confidence": 0.0,
-                "name": "",
-                "index": -1,
-                "error": "音频中未检测到有效语音",
-            }
-
-        # ---- 堆叠模板为矩阵，一次 matmul ----
-        indices = list(self._templates.keys())
-        names = [self._templates[idx][0] for idx in indices]
-        emb_matrix = np.stack([self._templates[idx][1] for idx in indices])  # [N, 256]
-        audio_vec = np.asarray(test_emb.cpu().numpy(), dtype=np.float32).reshape(1, -1)  # [1, 256]
-
-        norms = np.linalg.norm(emb_matrix, axis=1) * np.linalg.norm(audio_vec)
-        scores = (emb_matrix @ audio_vec.T).flatten() / norms  # [N]
+        scores = (self._template_matrix @ audio_vec.T).flatten() / (self._template_norms * audio_norm)
         scores = (scores + 1.0) / 2  # [-1, 1] => [0, 1]
 
         best_pos = int(np.argmax(scores))
         threshold = self._deep_config.sim_threshold
 
         logger.debug(
-            "Recognize multi: best=%s (idx=%d, score=%.4f)",
-            names[best_pos], indices[best_pos], scores[best_pos],
+            "Match templates: best=%s (score=%.4f, threshold=%.2f)",
+            self._template_names[best_pos], scores[best_pos], threshold,
         )
 
-        return {
-            "is_recognized": scores[best_pos] >= threshold,
-            "confidence": round(float(scores[best_pos]), 4),
-            "name": names[best_pos],
-            "index": indices[best_pos],
-            "threshold": threshold,
-        }
+        return RecognitionResult(
+            is_recognized=bool(scores[best_pos] >= threshold),
+            confidence=round(float(scores[best_pos]), 4),
+            name=self._template_names[best_pos],
+        )
+
+    def recognize_multi(self, audio_path: str | Path) -> RecognitionResult:
+        """比对音频与已缓存的模板，返回最佳匹配。
+
+        Args:
+            audio_path: WAV 文件路径。
+
+        Returns:
+            RecognitionResult。
+
+        Raises:
+            FileNotFoundError: 音频文件不存在。
+            ValueError: 音频中未检测到有效语音。
+            RuntimeError: 模板缓存为空。
+        """
+        audio_path = str(Path(audio_path))
+        if not Path(audio_path).is_file():
+            raise FileNotFoundError(f"文件不存在: {audio_path}")
+
+        test_emb = self._model.extract_embedding(audio_path)
+        if test_emb is None:
+            raise ValueError("音频中未检测到有效语音")
+
+        return self._match_templates(test_emb)
+
+    def recognize_multi_pcm(
+        self,
+        pcm: np.ndarray,
+        sample_rate: int = 16000,
+    ) -> RecognitionResult:
+        """比对 16-bit 16kHz PCM 数据与已缓存的模板，返回最佳匹配。
+
+        适用于流式/麦克风场景，pcm 为 int16 数组（16kHz 单声道）。
+        内部自动将 int16 归一化为 float32。
+
+        Args:
+            pcm: 16-bit PCM 音频数据，形状 (samples,) 或 (1, samples)。
+            sample_rate: 采样率，默认 16000。
+
+        Returns:
+            RecognitionResult。
+
+        Raises:
+            ValueError: 音频数据无效或未检测到有效语音。
+            RuntimeError: 模板缓存为空。
+        """
+        if pcm.ndim == 1:
+            pcm = pcm.reshape(1, -1)
+
+        if pcm.dtype == np.int16:
+            pcm_tensor = torch.from_numpy(pcm.astype(np.float32) / 32768.0)
+        else:
+            pcm_tensor = torch.from_numpy(pcm.astype(np.float32))
+
+        test_emb = self._model.extract_embedding_from_pcm(pcm_tensor, sample_rate)
+        if test_emb is None:
+            raise ValueError("音频中未检测到有效语音")
+
+        return self._match_templates(test_emb)
