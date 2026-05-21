@@ -53,6 +53,39 @@ Repository = "https://github.com/yourusername/wespeaker-deep-edge"
 
 [project.scripts]
 wespeaker-deep-edge = "wespeaker_deep_edge.client:main"
+wespeaker-deep-edge-server = "wespeaker_deep_edge.server.cli:main"
+
+[project.optional-dependencies]
+client = [
+    "websockets>=12.0",
+    "numpy==1.26.4",
+    "soundfile>=0.13.1",
+]
+server = [
+    "websockets>=12.0",
+    "numpy==1.26.4",
+    "soundfile>=0.13.1",
+    "torch==2.8.0",
+    "torchaudio==2.8.0",
+    "pyannote-audio>=3.3.2",
+    "scipy>=1.0",
+    "pydub>=0.25.0",
+    "pyyaml==6.0.3",
+    "silero-vad",
+    "audiomentations>=0.43.1",
+    "tqdm",
+    "hdbscan>=0.8.40",
+    "kaldiio",
+    "s3prl",
+    "umap-learn==0.5.6",
+    "accelerate",
+    "onnxruntime>=1.16.0,<2.0",
+    "openai-whisper",
+    "peft",
+    "scikit-learn",
+    "seaborn>=0.13.2",
+    "matplotlib>=3.10.9",
+]
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
@@ -71,6 +104,7 @@ where = ["src"]
 dev = [
     "pytest>=8.0",
     "pytest-cov>=5.0",
+    "pytest-asyncio>=0.21",
     "black>=24.0",
     "isort>=5.0",
 ]
@@ -81,6 +115,7 @@ pythonpath = ["."]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+asyncio_mode = "auto"
 addopts = "-v --cov=src/wespeaker_deep_edge --cov-report=term-missing --cov-fail-under=25"
 
 [tool.black]

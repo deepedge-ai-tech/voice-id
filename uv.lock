@@ -181,6 +181,15 @@ wheels = [
 ]
 
 [[package]]
+name = "backports-asyncio-runner"
+version = "1.2.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/8e/ff/70dca7d7cb1cbc0edb2c6cc0c38b65cba36cccc491eca64cabd5fe7f8670/backports_asyncio_runner-1.2.0.tar.gz", hash = "sha256:a5aa7b2b7d8f8bfcaa2b57313f70792df84e32a2a746f585213373f900b42162", size = 69893, upload-time = "2025-07-02T02:27:15.685Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/a0/59/76ab57e3fe74484f48a53f8e337171b4a2349e506eabe136d7e01d059086/backports_asyncio_runner-1.2.0-py3-none-any.whl", hash = "sha256:0da0a936a8aeb554eccb426dc55af3ba63bcdc69fa1a600b5bb305413a4477b5", size = 12313, upload-time = "2025-07-02T02:27:14.263Z" },
+]
+
+[[package]]
 name = "black"
 version = "26.3.1"
 source = { registry = "https://pypi.org/simple" }
@@ -1565,6 +1574,20 @@ wheels = [
 ]
 
 [[package]]
+name = "pytest-asyncio"
+version = "1.3.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "backports-asyncio-runner" },
+    { name = "pytest" },
+    { name = "typing-extensions" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/90/2c/8af215c0f776415f3590cac4f9086ccefd6fd463befeae41cd4d3f193e5a/pytest_asyncio-1.3.0.tar.gz", hash = "sha256:d7f52f36d231b80ee124cd216ffb19369aa168fc10095013c6b014a34d3ee9e5", size = 50087, upload-time = "2025-11-10T16:07:47.256Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/e5/35/f8b19922b6a25bc0880171a2f1a003eaeb93657475193ab516fd87cac9da/pytest_asyncio-1.3.0-py3-none-any.whl", hash = "sha256:611e26147c7f77640e6d0a92a38ed17c3e9848063698d5c93d5aa7aa11cebff5", size = 15075, upload-time = "2025-11-10T16:07:45.537Z" },
+]
+
+[[package]]
 name = "pytest-cov"
 version = "7.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -2345,8 +2368,26 @@ wheels = [
 ]
 
 [[package]]
+name = "websockets"
+version = "16.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/04/24/4b2031d72e840ce4c1ccb255f693b15c334757fc50023e4db9537080b8c4/websockets-16.0.tar.gz", hash = "sha256:5f6261a5e56e8d5c42a4497b364ea24d94d9563e8fbd44e78ac40879c60179b5", size = 179346, upload-time = "2026-01-10T09:23:47.181Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/20/74/221f58decd852f4b59cc3354cccaf87e8ef695fede361d03dc9a7396573b/websockets-16.0-cp310-cp310-macosx_10_9_universal2.whl", hash = "sha256:04cdd5d2d1dacbad0a7bf36ccbcd3ccd5a30ee188f2560b7a62a30d14107b31a", size = 177343, upload-time = "2026-01-10T09:22:21.28Z" },
+    { url = "https://files.pythonhosted.org/packages/19/0f/22ef6107ee52ab7f0b710d55d36f5a5d3ef19e8a205541a6d7ffa7994e5a/websockets-16.0-cp310-cp310-macosx_10_9_x86_64.whl", hash = "sha256:8ff32bb86522a9e5e31439a58addbb0166f0204d64066fb955265c4e214160f0", size = 175021, upload-time = "2026-01-10T09:22:22.696Z" },
+    { url = "https://files.pythonhosted.org/packages/10/40/904a4cb30d9b61c0e278899bf36342e9b0208eb3c470324a9ecbaac2a30f/websockets-16.0-cp310-cp310-macosx_11_0_arm64.whl", hash = "sha256:583b7c42688636f930688d712885cf1531326ee05effd982028212ccc13e5957", size = 175320, upload-time = "2026-01-10T09:22:23.94Z" },
+    { url = "https://files.pythonhosted.org/packages/9d/2f/4b3ca7e106bc608744b1cdae041e005e446124bebb037b18799c2d356864/websockets-16.0-cp310-cp310-manylinux1_x86_64.manylinux_2_28_x86_64.manylinux_2_5_x86_64.whl", hash = "sha256:7d837379b647c0c4c2355c2499723f82f1635fd2c26510e1f587d89bc2199e72", size = 183815, upload-time = "2026-01-10T09:22:25.469Z" },
+    { url = "https://files.pythonhosted.org/packages/86/26/d40eaa2a46d4302becec8d15b0fc5e45bdde05191e7628405a19cf491ccd/websockets-16.0-cp310-cp310-manylinux2014_aarch64.manylinux_2_17_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:df57afc692e517a85e65b72e165356ed1df12386ecb879ad5693be08fac65dde", size = 185054, upload-time = "2026-01-10T09:22:27.101Z" },
+    { url = "https://files.pythonhosted.org/packages/b0/ba/6500a0efc94f7373ee8fefa8c271acdfd4dca8bd49a90d4be7ccabfc397e/websockets-16.0-cp310-cp310-musllinux_1_2_aarch64.whl", hash = "sha256:2b9f1e0d69bc60a4a87349d50c09a037a2607918746f07de04df9e43252c77a3", size = 184565, upload-time = "2026-01-10T09:22:28.293Z" },
+    { url = "https://files.pythonhosted.org/packages/04/b4/96bf2cee7c8d8102389374a2616200574f5f01128d1082f44102140344cc/websockets-16.0-cp310-cp310-musllinux_1_2_x86_64.whl", hash = "sha256:335c23addf3d5e6a8633f9f8eda77efad001671e80b95c491dd0924587ece0b3", size = 183848, upload-time = "2026-01-10T09:22:30.394Z" },
+    { url = "https://files.pythonhosted.org/packages/02/8e/81f40fb00fd125357814e8c3025738fc4ffc3da4b6b4a4472a82ba304b41/websockets-16.0-cp310-cp310-win32.whl", hash = "sha256:37b31c1623c6605e4c00d466c9d633f9b812ea430c11c8a278774a1fde1acfa9", size = 178249, upload-time = "2026-01-10T09:22:32.083Z" },
+    { url = "https://files.pythonhosted.org/packages/b4/5f/7e40efe8df57db9b91c88a43690ac66f7b7aa73a11aa6a66b927e44f26fa/websockets-16.0-cp310-cp310-win_amd64.whl", hash = "sha256:8e1dab317b6e77424356e11e99a432b7cb2f3ec8c5ab4dabbcee6add48f72b35", size = 178685, upload-time = "2026-01-10T09:22:33.345Z" },
+    { url = "https://files.pythonhosted.org/packages/6f/28/258ebab549c2bf3e64d2b0217b973467394a9cea8c42f70418ca2c5d0d2e/websockets-16.0-py3-none-any.whl", hash = "sha256:1637db62fad1dc833276dded54215f2c7fa46912301a24bd94d45d46a011ceec", size = 171598, upload-time = "2026-01-10T09:23:45.395Z" },
+]
+
+[[package]]
 name = "wespeaker-deep-edge"
-version = "0.1.22"
+version = "0.1.23"
 source = { editable = "." }
 dependencies = [
     { name = "accelerate" },
@@ -2374,46 +2415,107 @@ dependencies = [
     { name = "umap-learn" },
 ]
 
+[package.optional-dependencies]
+client = [
+    { name = "numpy" },
+    { name = "soundfile" },
+    { name = "websockets" },
+]
+server = [
+    { name = "accelerate" },
+    { name = "audiomentations" },
+    { name = "hdbscan" },
+    { name = "kaldiio" },
+    { name = "matplotlib" },
+    { name = "numpy" },
+    { name = "onnxruntime" },
+    { name = "openai-whisper" },
+    { name = "peft" },
+    { name = "pyannote-audio" },
+    { name = "pydub" },
+    { name = "pyyaml" },
+    { name = "s3prl" },
+    { name = "scikit-learn" },
+    { name = "scipy" },
+    { name = "seaborn" },
+    { name = "silero-vad" },
+    { name = "soundfile" },
+    { name = "torch" },
+    { name = "torchaudio" },
+    { name = "tqdm" },
+    { name = "umap-learn" },
+    { name = "websockets" },
+]
+
 [package.dev-dependencies]
 dev = [
     { name = "black" },
     { name = "isort" },
     { name = "pytest" },
+    { name = "pytest-asyncio" },
     { name = "pytest-cov" },
 ]
 
 [package.metadata]
 requires-dist = [
     { name = "accelerate" },
+    { name = "accelerate", marker = "extra == 'server'" },
     { name = "audiomentations", specifier = ">=0.43.1" },
+    { name = "audiomentations", marker = "extra == 'server'", specifier = ">=0.43.1" },
     { name = "hdbscan", specifier = ">=0.8.40" },
+    { name = "hdbscan", marker = "extra == 'server'", specifier = ">=0.8.40" },
     { name = "kaldiio" },
+    { name = "kaldiio", marker = "extra == 'server'" },
     { name = "matplotlib", specifier = ">=3.10.9" },
+    { name = "matplotlib", marker = "extra == 'server'", specifier = ">=3.10.9" },
     { name = "numpy", specifier = "==1.26.4" },
+    { name = "numpy", marker = "extra == 'client'", specifier = "==1.26.4" },
+    { name = "numpy", marker = "extra == 'server'", specifier = "==1.26.4" },
     { name = "onnxruntime", specifier = ">=1.16.0,<2.0" },
+    { name = "onnxruntime", marker = "extra == 'server'", specifier = ">=1.16.0,<2.0" },
     { name = "openai-whisper" },
+    { name = "openai-whisper", marker = "extra == 'server'" },
     { name = "peft" },
+    { name = "peft", marker = "extra == 'server'" },
     { name = "pyannote-audio", specifier = ">=3.3.2" },
+    { name = "pyannote-audio", marker = "extra == 'server'", specifier = ">=3.3.2" },
     { name = "pydub", specifier = ">=0.25.0" },
+    { name = "pydub", marker = "extra == 'server'", specifier = ">=0.25.0" },
     { name = "pyyaml", specifier = "==6.0.3" },
+    { name = "pyyaml", marker = "extra == 'server'", specifier = "==6.0.3" },
     { name = "s3prl" },
+    { name = "s3prl", marker = "extra == 'server'" },
     { name = "scikit-learn" },
+    { name = "scikit-learn", marker = "extra == 'server'" },
     { name = "scipy", specifier = ">=1.0" },
+    { name = "scipy", marker = "extra == 'server'", specifier = ">=1.0" },
     { name = "seaborn", specifier = ">=0.13.2" },
+    { name = "seaborn", marker = "extra == 'server'", specifier = ">=0.13.2" },
     { name = "silero-vad" },
+    { name = "silero-vad", marker = "extra == 'server'" },
     { name = "sounddevice", specifier = "==0.5.2" },
     { name = "soundfile", specifier = ">=0.13.1" },
+    { name = "soundfile", marker = "extra == 'client'", specifier = ">=0.13.1" },
+    { name = "soundfile", marker = "extra == 'server'", specifier = ">=0.13.1" },
     { name = "torch", specifier = "==2.8.0" },
+    { name = "torch", marker = "extra == 'server'", specifier = "==2.8.0" },
     { name = "torchaudio", specifier = "==2.8.0" },
+    { name = "torchaudio", marker = "extra == 'server'", specifier = "==2.8.0" },
     { name = "tqdm" },
+    { name = "tqdm", marker = "extra == 'server'" },
     { name = "umap-learn", specifier = "==0.5.6" },
+    { name = "umap-learn", marker = "extra == 'server'", specifier = "==0.5.6" },
+    { name = "websockets", marker = "extra == 'client'", specifier = ">=12.0" },
+    { name = "websockets", marker = "extra == 'server'", specifier = ">=12.0" },
 ]
+provides-extras = ["client", "server"]
 
 [package.metadata.requires-dev]
 dev = [
     { name = "black", specifier = ">=24.0" },
     { name = "isort", specifier = ">=5.0" },
     { name = "pytest", specifier = ">=8.0" },
+    { name = "pytest-asyncio", specifier = ">=0.21" },
     { name = "pytest-cov", specifier = ">=5.0" },
 ]
 
