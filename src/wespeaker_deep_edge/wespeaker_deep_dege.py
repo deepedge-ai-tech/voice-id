@@ -277,3 +277,78 @@ class WespeakerDeep:
             "confidence": round(score, 4),
             "threshold": threshold,
         }
+
+    def recognize_multi(
+        self,
+        audio_path: str | Path,
+        indices: list[int] | None = None,
+    ) -> dict[str, Any]:
+        """将音频与多个内置声纹比对，返回最佳匹配。
+
+        使用 numpy 矩阵批量计算余弦相似度，避免逐人遍历。
+        所有模板堆叠为 [N, 256] 矩阵，一次 matmul 得到所有分数。
+
+        Args:
+            audio_path: 待测试音频文件路径。
+            indices: 内置声纹索引列表，如 [0, 1, 2]。
+                None 时遍历所有内置声纹 (0-7)。
+
+        Returns:
+            {"is_recognized": bool, "confidence": float, "name": str,
+             "index": int, "threshold": float}
+        """
+        from ._voiceprints import get_voiceprint_path, get_voiceprint_name, _PEOPLE
+
+        audio_path = str(Path(audio_path))
+        if not Path(audio_path).is_file():
+            return {
+                "is_recognized": False,
+                "confidence": 0.0,
+                "name": "",
+                "index": -1,
+                "error": f"文件不存在: {audio_path}",
+            }
+
+        indices = indices if indices is not None else list(range(len(_PEOPLE)))
+
+        # ---- 只提取一次音频 embedding ----
+        test_emb = self._model.extract_embedding(audio_path)
+        if test_emb is None:
+            return {
+                "is_recognized": False,
+                "confidence": 0.0,
+                "name": "",
+                "index": -1,
+                "error": "音频中未检测到有效语音",
+            }
+
+        # ---- 批量矩阵计算 cosine similarity ----
+        emb_list = []
+        names = []
+        for idx in indices:
+            ref_data = self.load(get_voiceprint_path(idx))
+            emb_list.append(ref_data.astype(np.float32))
+            names.append(get_voiceprint_name(idx))
+
+        emb_matrix = np.stack(emb_list)  # [N, 256]
+        audio_vec = np.asarray(test_emb.cpu().numpy(), dtype=np.float32).reshape(1, -1)  # [1, 256]
+
+        norms = np.linalg.norm(emb_matrix, axis=1) * np.linalg.norm(audio_vec)
+        scores = (emb_matrix @ audio_vec.T).flatten() / norms  # [N]
+        scores = (scores + 1.0) / 2  # [-1, 1] => [0, 1]
+
+        best_pos = int(np.argmax(scores))
+        threshold = self._deep_config.sim_threshold
+
+        logger.debug(
+            "Recognize multi: indices=%s, best=%s (idx=%d, score=%.4f)",
+            indices, names[best_pos], indices[best_pos], scores[best_pos],
+        )
+
+        return {
+            "is_recognized": scores[best_pos] >= threshold,
+            "confidence": round(float(scores[best_pos]), 4),
+            "name": names[best_pos],
+            "index": indices[best_pos],
+            "threshold": threshold,
+        }
