@@ -43,6 +43,8 @@ dependencies = [
     "scikit-learn",
     "seaborn>=0.13.2",
     "matplotlib>=3.10.9",
+    "datasets",
+    "huggingface-hub",
 ]
 
 [project.urls]
@@ -99,6 +101,7 @@ where = ["src"]
 "wespeaker_deep_edge._models" = ["**/*"]
 "wespeaker_deep_edge._voiceprints" = ["**/*"]
 "wespeaker_deep_edge._wespeaker" = ["**/*"]
+"wespeaker_deep_edge._cohort" = ["**/*"]
 
 [dependency-groups]
 dev = [
