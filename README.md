@@ -78,14 +78,16 @@ wespeaker-deep-edge recognize test.mp3 voice.pkl --package-pk-index 2   # Michae
 
 ### 内置声纹索引
 
-| Index | Name     |
-|-------|----------|
-| 0     | John     |
-| 1     | Frank    |
-| 2     | Michael  |
-| 3     | Qingqing |
-| 4     | Xixi     |
-| 5     | Zhong    |
+| Index | Name         |
+|-------|--------------|
+| 0     | John         |
+| 1     | Frank        |
+| 2     | Michael      |
+| 3     | Qingqing     |
+| 4     | Xixi         |
+| 5     | Zhong        |
+| 6     | Angle        |
+| 7     | Albert       |
 
 > 不传 `voiceprint` 参数时，默认使用 John (index 0) 的声纹。
 
@@ -180,7 +182,7 @@ Voice-ID/
 │   │   └── template_manager.py       #     多模板矩阵管理
 │   ├── client/                       #   WebSocket 客户端 SDK
 │   │   └── speaker_client.py         #     SpeakerClient
-│   ├── _voiceprints/                 #   内置声纹（8人）
+│   ├── _voiceprints/                 #   内置声纹（9人）
 │   ├── _models/                      #   内置模型
 │   └── _wespeaker/                   #   vendored 官方 WeSpeaker
 ├── tests/                            # 测试套件

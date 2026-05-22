@@ -153,9 +153,8 @@ ls $(python3 -c "import tempfile; print(tempfile.gettempdir())")/wespeaker_debug
 | 3     | Qingqing     |
 | 4     | Xixi         |
 | 5     | Zhong        |
-| 6     | John_usb_yun |
-| 7     | Angle        |
-| 8     | Albert       |
+| 6     | Angle        |
+| 7     | Albert       |
 
 - CLI: `--package-pk-index <index>` 选择内置声纹，不传 `voiceprint` 时默认 John (index 0)
 - Python API: 设置 `client.package_pk_index` 或 `recognize()` 不传 `pk_path`

@@ -20,7 +20,6 @@ _PRESET_MAP: dict[str, str] = {
     "preset_xixi": "voice_xixi.pkl",
     "preset_zhong": "voice_zhong.pkl",
     "preset_angle": "voice_angle.pkl",
-    "preset_john_usb_yun": "voice_john_usb_yun.pkl",
 }
 
 
