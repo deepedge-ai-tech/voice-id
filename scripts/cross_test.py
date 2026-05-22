@@ -27,7 +27,7 @@ import seaborn as sns
 import wespeaker_deep_edge  # 将 vendored _wespeaker/ 加入 sys.path
 import wespeaker
 
-from src.wespeaker_deep_edge.asnorm import CohortCache
+from wespeaker_deep_edge.asnorm import CohortCache
 
 logging.basicConfig(level=logging.WARNING, format="%(levelname)s: %(message)s")
 
@@ -60,10 +60,6 @@ SPEAKERS = {
     "John_D_USB_AEC": {
         "register": str(ASSET_COMBINE / "John.wav"),
         "test_dir": "asset/john_d_usb_AEC/test_segments",
-    },
-    "John_RealTime": {
-        "register": str(ASSET_COMBINE / "John.wav"),
-        "test_dir": "asset/john_real_time/test_segments",
     },
     "Michael": {
         "register": str(ASSET_COMBINE / "Michael.wav"),
@@ -102,7 +98,6 @@ SPEAKER_ORDER = [
     "John_MeetingRoom",
     "John_D_USB",
     "John_D_USB_AEC",
-    "John_RealTime",
     "Michael",
     "Zhong",
     "Zhong_D_USB",
@@ -114,12 +109,11 @@ SPEAKER_ORDER = [
 
 # Same-person groups
 SAME_PERSON_GROUPS: dict[str, set[str]] = {
-    "John": {"John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC", "John_RealTime"},
-    "John_USB": {"John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC", "John_RealTime"},
-    "John_MeetingRoom": {"John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC", "John_RealTime"},
-    "John_D_USB": {"John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC", "John_RealTime"},
-    "John_D_USB_AEC": {"John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC", "John_RealTime"},
-    "John_RealTime": {"John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC", "John_RealTime"},
+    "John": {"John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC"},
+    "John_USB": {"John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC"},
+    "John_MeetingRoom": {"John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC"},
+    "John_D_USB": {"John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC"},
+    "John_D_USB_AEC": {"John", "John_USB", "John_MeetingRoom", "John_D_USB", "John_D_USB_AEC"},
     "Michael": {"Michael"},
     "Zhong": {"Zhong", "Zhong_D_USB"},
     "Zhong_D_USB": {"Zhong", "Zhong_D_USB"},
@@ -156,7 +150,9 @@ def plot_heatmap(
     fig_height = max(16, len(row_labels) * 0.35)
     fig, ax = plt.subplots(figsize=(18, fig_height))
 
-    im = ax.imshow(scores, cmap="RdYlGn", aspect="auto", vmin=-0.2, vmax=1.0)
+    vmax = max(scores.max(), 1.0)
+    vmin = min(scores.min(), -0.2)
+    im = ax.imshow(scores, cmap="RdYlGn", aspect="auto", vmin=vmin, vmax=vmax)
 
     ax.set_xticks(np.arange(len(col_labels)))
     ax.set_yticks(np.arange(len(row_labels)))
@@ -267,6 +263,8 @@ def recognize(
     enroll_embs: dict[str, np.ndarray],
     active_people: list[str],
     cohort: CohortCache | None = None,
+    norm_type: str = "asnorm",
+    top_k: int = 300,
 ) -> dict[str, list[tuple[str, list[float]]]]:
     """Extract test embeddings and compute per-file similarity against all enrollments.
 
@@ -313,7 +311,7 @@ def recognize(
                     if hasattr(temb, "cpu")
                     else np.asarray(temb, dtype=np.float32)
                 )
-                norm_scores, _, _ = cohort.apply(temb_np, top_k=300)
+                norm_scores, _, _ = cohort.apply(temb_np, top_k=top_k, norm_type=norm_type)
                 entries.append((fname.name, norm_scores.tolist()))
             else:
                 entries.append((fname.name, raw_scores))
@@ -333,11 +331,15 @@ def cross_test(
     output_dir: Path | None = None,
     verbose: bool = False,
     asnorm: bool = False,
+    norm_type: str = "asnorm",
+    top_k: int = 300,
 ) -> None:
     print("=" * 60)
     print("声纹交叉测试 (wespeaker vblinkf + VAD)")
     if asnorm:
-        print("  AS-Norm 归一化已启用")
+        if threshold == 0.55:
+            threshold = 6.0
+        print(f"  AS-Norm 归一化已启用 ({norm_type.upper()}, top_k={top_k}, 阈值={threshold})")
     print("=" * 60)
 
     # 1. Load model
@@ -385,14 +387,14 @@ def cross_test(
                 else np.asarray(e, dtype=np.float32)
                 for e in (enroll_embs[p] for p in active_people)
             ])
-            cohort.precompute_enroll_stats(enroll_matrix, enroll_names=active_people, top_k=300)
+            cohort.precompute_enroll_stats(enroll_matrix, enroll_names=active_people, top_k=top_k)
             print(f"  AS-Norm cohort 已加载: {cohort_path} ({cohort.size} speakers)")
         else:
             print(f"  WARNING: cohort 文件不存在: {cohort_path}，AS-Norm 跳过")
 
     # 4. Recognize (extract test embeddings + compute similarity)
     print(f"\n[4/4] 识别 ({len(active_people)} 人)...")
-    per_file_results = recognize(model, test_files_map, enroll_embs, active_people, cohort=cohort)
+    per_file_results = recognize(model, test_files_map, enroll_embs, active_people, cohort=cohort, norm_type=norm_type, top_k=top_k)
     active_people = list(per_file_results.keys())
 
     N = len(active_people)
@@ -501,7 +503,24 @@ def cross_test(
         for e in errors["false_rejects"][:10]:
             print(f"    {e['test']}/{e['file']} → {e['ref']}: 得分={e['score']:.3f} 低于阈值={e['gap']:.3f}")
 
-    # 8. Save charts
+    # 8. Optimal threshold search (EER) for AS-Norm
+    if asnorm:
+        best_eer = 100.0
+        best_th = threshold
+        for th in np.arange(0.5, 20.0, 0.25):
+            fa = sum(1 for s in diff_scores_all if s >= th)
+            fr = sum(1 for s in same_scores_all if s < th)
+            total_diff = len(diff_scores_all) or 1
+            total_same = len(same_scores_all) or 1
+            fa_rate = fa / total_diff * 100
+            fr_rate = fr / total_same * 100
+            eer = (fa_rate + fr_rate) / 2
+            if eer < best_eer:
+                best_eer = eer
+                best_th = th
+        print(f"\n  最优阈值: {best_th:.2f} (EER={best_eer:.1f}%, FA={sum(1 for s in diff_scores_all if s >= best_th)/max(len(diff_scores_all),1)*100:.1f}%, FR={sum(1 for s in same_scores_all if s < best_th)/max(len(same_scores_all),1)*100:.1f}%)")
+
+    # 9. Save charts
     if output_dir:
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
@@ -523,12 +542,14 @@ def cross_test(
         # Aggregate heatmap
         agg_path = output_dir / f"cross_test_aggregate_{timestamp}.png"
         fig, ax = plt.subplots(figsize=(10, 8))
+        agg_vmax = max(sim_matrix.max(), 1.0)
+        agg_vmin = min(sim_matrix.min(), -0.2)
         sns.heatmap(
             sim_matrix,
             xticklabels=col_labels, yticklabels=col_labels,
             annot=True, fmt=".3f", cmap="RdYlGn",
-            vmin=-0.2, vmax=1.0,
-            cbar_kws={"label": "Cosine Similarity"},
+            vmin=agg_vmin, vmax=agg_vmax,
+            cbar_kws={"label": "Score"},
             linewidths=1, linecolor="white", ax=ax,
         )
         ax.set_title(f"WeSpeaker 交叉测试聚合 (vblinkf + VAD, 阈值={threshold})", fontsize=14)
@@ -547,9 +568,12 @@ def cross_test(
 
     # 9. Summary line
     print("\n" + "-" * 60)
+    norm_label = f"asnorm={'on' if asnorm else 'off'}"
+    if asnorm:
+        norm_label += f"/{norm_type}(k={top_k})"
     print(f"SUMMARY: 同人={same_mean:.1f}%, 异人={diff_mean:.1f}%, "
           f"差距={gap:.1f}%, FA={n_fa}, FR={n_fr}, "
-          f"asnorm={'on' if asnorm else 'off'}")
+          f"{norm_label}")
     print("-" * 60)
 
 
@@ -578,6 +602,15 @@ def main() -> None:
         "--asnorm", action="store_true",
         help="启用 AS-Norm 分数归一化",
     )
+    parser.add_argument(
+        "--norm-type", type=str, default="asnorm",
+        choices=["asnorm", "snorm", "tnorm"],
+        help="归一化类型: asnorm (both), snorm (test-side), tnorm (enroll-side)",
+    )
+    parser.add_argument(
+        "--top-k", type=int, default=300,
+        help="Cohort top-k 统计数量 (default: 300)",
+    )
     args = parser.parse_args()
 
     # Verify asset files exist
@@ -591,7 +624,8 @@ def main() -> None:
             sys.exit(1)
 
     output_path = Path(args.output_dir) if args.output_dir else None
-    cross_test(args.threshold, output_path, args.verbose, args.asnorm)
+    cross_test(args.threshold, output_path, args.verbose, args.asnorm,
+               norm_type=args.norm_type, top_k=args.top_k)
 
 
 if __name__ == "__main__":

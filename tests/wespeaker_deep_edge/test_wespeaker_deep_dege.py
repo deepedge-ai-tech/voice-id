@@ -34,13 +34,15 @@ class TestDeepConfigDefaults:
         assert cfg.package_pk_index == 3
 
     def test_default_enable_asnorm(self) -> None:
-        assert DeepConfig().enable_asnorm is False
+        assert DeepConfig().enable_asnorm is True
+        assert DeepConfig().asnorm_norm_type == "snorm"
+        assert DeepConfig().asnorm_threshold == 6.0
 
     def test_default_asnorm_top_k(self) -> None:
         assert DeepConfig().asnorm_top_k == 300
 
     def test_default_asnorm_cohort_path(self) -> None:
-        assert DeepConfig().asnorm_cohort_path == "asset/cohort/cohort_embeddings.npy"
+        assert DeepConfig().asnorm_cohort_path == ""
 
 
 # ============================================================================ #
@@ -495,7 +497,8 @@ class TestWespeakerDeepLoadCohort:
 
     def test_load_cohort_without_asnorm_does_nothing(self) -> None:
         """enable_asnorm=False 时 load_cohort() 不执行任何操作。"""
-        deep = _make_deep()  # enable_asnorm=False by default
+        cfg = DeepConfig(enable_asnorm=False)
+        deep = _make_deep(cfg)
 
         with patch(
             "src.wespeaker_deep_edge.wespeaker_deep_dege.CohortCache.load",

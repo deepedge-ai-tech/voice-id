@@ -60,6 +60,28 @@ def _normalize_scores(scores: np.ndarray) -> np.ndarray:
     return (scores + 1.0) / 2.0
 
 
+def _sigmoid(x: np.ndarray) -> np.ndarray:
+    """Squash real-valued scores to (0, 1) via logistic sigmoid.
+
+    Uses a gentle slope (x/3) so that typical AS-Norm z-scores
+    spread across the (0, 1) range instead of collapsing near 1::
+
+        z=0  → 0.50
+        z=3  → 0.73
+        z=6  → 0.88
+        z=9  → 0.95
+        z=12 → 0.98
+
+    Args:
+        x: Input scores (unbounded).
+
+    Returns:
+        Scores in (0, 1).
+    """
+    x_clipped = np.clip(x / 3.0, -100, 100)
+    return 1.0 / (1.0 + np.exp(-x_clipped))
+
+
 # --------------------------------------------------------------------------- #
 #  Core functions
 # --------------------------------------------------------------------------- #
@@ -359,7 +381,8 @@ class CohortCache:
         return enroll_mu, enroll_sigma
 
     def apply(
-        self, test_emb: np.ndarray, top_k: int = 300
+        self, test_emb: np.ndarray, top_k: int = 300,
+        norm_type: str = "asnorm",
     ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
         """Apply full AS-Norm pipeline using precomputed enrollment stats.
 
@@ -373,6 +396,8 @@ class CohortCache:
             top_k: Number of top cohort scores to use for test-side
                 statistics.  Does **not** override the enrollment-side
                 top_k used during precomputation.
+            norm_type: Normalization variant — ``"asnorm"`` (both sides),
+                ``"snorm"`` (test-side only), or ``"tnorm"`` (enroll-side only).
 
         Returns:
             Tuple of (norm_scores, enroll_mu, enroll_sigma).
@@ -409,12 +434,20 @@ class CohortCache:
         raw_scores_norm = _normalize_scores(raw_scores)
 
         # --- Apply AS-Norm formula (vectorised) ------------------------ #
-        # norm_i = 0.5*(raw - mu_enroll_i)/sigma_enroll_i
-        #        + 0.5*(raw - mu_test)/sigma_test
-        sigma_test_arr = np.full_like(raw_scores_norm, sigma_test)
-        norm_scores = (
-            0.5 * (raw_scores_norm - self._enroll_mu) / self._enroll_sigma
-            + 0.5 * (raw_scores_norm - mu_test) / sigma_test_arr
-        ).astype(np.float32)
+        if norm_type == "tnorm":
+            norm_scores = (
+                (raw_scores_norm - self._enroll_mu) / self._enroll_sigma
+            ).astype(np.float32)
+        elif norm_type == "snorm":
+            sigma_test_arr = np.full_like(raw_scores_norm, sigma_test)
+            norm_scores = (
+                (raw_scores_norm - mu_test) / sigma_test_arr
+            ).astype(np.float32)
+        else:  # "asnorm"
+            sigma_test_arr = np.full_like(raw_scores_norm, sigma_test)
+            norm_scores = (
+                0.5 * (raw_scores_norm - self._enroll_mu) / self._enroll_sigma
+                + 0.5 * (raw_scores_norm - mu_test) / sigma_test_arr
+            ).astype(np.float32)
 
         return norm_scores, self._enroll_mu, self._enroll_sigma

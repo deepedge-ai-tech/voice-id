@@ -72,9 +72,11 @@ class DeepConfig:
     package_pk_index: int | None = None
 
     # AS-Norm settings
-    enable_asnorm: bool = False
+    enable_asnorm: bool = True
+    asnorm_norm_type: str = "snorm"
+    asnorm_threshold: float = 6.0
     asnorm_top_k: int = 300
-    asnorm_cohort_path: str = "asset/cohort/cohort_embeddings.npy"
+    asnorm_cohort_path: str = ""
 
 
 # --------------------------------------------------------------------------- #
@@ -350,6 +352,10 @@ class WespeakerDeep:
 
         logger.info("Loaded %d templates: %s", len(names), names)
 
+        # Auto-load cohort if AS-Norm is enabled and not yet loaded.
+        if self._deep_config.enable_asnorm and self._cohort_cache is None:
+            self.load_cohort()
+
         self._precompute_cohort_stats_if_needed()
 
     def clear_templates(self) -> None:
@@ -361,12 +367,31 @@ class WespeakerDeep:
     def load_cohort(self, path: str | Path | None = None) -> None:
         """Load AS-Norm cohort embeddings from file.
 
+        By default, loads the bundled cohort from the package. Set
+        *path* to override with an external file.
+
         Args:
             path: Path to cohort .npy file. None uses config.asnorm_cohort_path.
         """
         if not self._deep_config.enable_asnorm:
             return
-        path = Path(path or self._deep_config.asnorm_cohort_path)
+
+        path = Path(path or self._deep_config.asnorm_cohort_path or "")
+
+        # Resolve: absolute path, CWD-relative, or bundled package resource.
+        if path.is_absolute() and path.is_file():
+            pass  # use as-is
+        elif path.is_file():
+            pass  # CWD-relative found
+        else:
+            # Try bundled cohort inside the package.
+            from importlib import resources
+
+            bundled = resources.files("wespeaker_deep_edge._cohort") / "cohort_embeddings.npy"
+            if bundled.is_file():
+                path = bundled
+            # else: let CohortCache.load raise FileNotFoundError.
+
         try:
             self._cohort_cache = CohortCache.load(path)
             logger.info("Loaded cohort: %s (%d speakers)", path, self._cohort_cache.size)
@@ -497,15 +522,18 @@ class WespeakerDeep:
         ):
             test_emb_np = np.asarray(test_emb.cpu().numpy(), dtype=np.float32)
             k = self._deep_config.asnorm_top_k
-            norm_scores, _, _ = self._cohort_cache.apply(test_emb_np, top_k=k)
+            norm_scores, _, _ = self._cohort_cache.apply(
+                test_emb_np, top_k=k, norm_type=self._deep_config.asnorm_norm_type,
+            )
 
             best_idx = int(np.argmax(norm_scores))
             names = self._template_names
-            threshold = self._deep_config.sim_threshold
+            threshold = self._deep_config.asnorm_threshold
 
             logger.debug(
-                "AS-Norm applied: raw best=%.4f, norm best=%.4f",
+                "AS-Norm applied: raw best=%.4f, norm best=%.4f (type=%s, th=%.2f)",
                 raw_result.confidence, norm_scores[best_idx],
+                self._deep_config.asnorm_norm_type, threshold,
             )
 
             return RecognitionResult(
