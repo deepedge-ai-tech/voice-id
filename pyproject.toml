@@ -1,6 +1,6 @@
 [project]
 name = "wespeaker-deep-edge"
-version = "0.1.24"
+version = "0.1.25"
 description = "WeSpeaker 声纹识别工具 — 独立的声纹注册与识别 CLI 工具"
 readme = "README.md"
 license = "MIT"
@@ -18,7 +18,20 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Operating System :: OS Independent",
 ]
-dependencies = [
+dependencies = []
+
+[project.urls]
+Homepage = "https://github.com/yourusername/wespeaker-deep-edge"
+Documentation = "https://github.com/yourusername/wespeaker-deep-edge#readme"
+Repository = "https://github.com/yourusername/wespeaker-deep-edge"
+"Bug Tracker" = "https://github.com/yourusername/wespeaker-deep-edge/issues"
+
+[project.scripts]
+# 通过 `python -m wespeaker_deep_edge` 调用
+# 直接 CLI 入口（查看版本用 `--version`）
+
+[project.optional-dependencies]
+deps = [
     "audiomentations>=0.43.1",
     "hdbscan>=0.8.40",
     "kaldiio",
@@ -45,48 +58,6 @@ dependencies = [
     "matplotlib>=3.10.9",
     "datasets",
     "huggingface-hub",
-]
-
-[project.urls]
-Homepage = "https://github.com/yourusername/wespeaker-deep-edge"
-Documentation = "https://github.com/yourusername/wespeaker-deep-edge#readme"
-Repository = "https://github.com/yourusername/wespeaker-deep-edge"
-"Bug Tracker" = "https://github.com/yourusername/wespeaker-deep-edge/issues"
-
-[project.scripts]
-wespeaker-deep-edge = "wespeaker_deep_edge.client:main"
-wespeaker-deep-edge-server = "wespeaker_deep_edge.server.cli:main"
-
-[project.optional-dependencies]
-client = [
-    "websockets>=12.0",
-    "numpy==1.26.4",
-    "soundfile>=0.13.1",
-]
-server = [
-    "websockets>=12.0",
-    "numpy==1.26.4",
-    "soundfile>=0.13.1",
-    "torch==2.8.0",
-    "torchaudio==2.8.0",
-    "pyannote-audio>=3.3.2",
-    "scipy>=1.0",
-    "pydub>=0.25.0",
-    "pyyaml==6.0.3",
-    "silero-vad",
-    "audiomentations>=0.43.1",
-    "tqdm",
-    "hdbscan>=0.8.40",
-    "kaldiio",
-    "s3prl",
-    "umap-learn==0.5.6",
-    "accelerate",
-    "onnxruntime>=1.16.0,<2.0",
-    "openai-whisper",
-    "peft",
-    "scikit-learn",
-    "seaborn>=0.13.2",
-    "matplotlib>=3.10.9",
 ]
 
 [build-system]

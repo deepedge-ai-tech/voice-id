@@ -6,12 +6,15 @@
 import argparse
 import logging
 import sys
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
 from ._voiceprints import get_voiceprint_path, get_voiceprint_name
 from .wespeaker_deep_dege import DeepConfig, WespeakerDeep
 
 logger = logging.getLogger(__name__)
+
+_PKG_VERSION = _pkg_version("wespeaker-deep-edge")
 
 
 def _voiceprint_index_type(val: str) -> int:
@@ -26,6 +29,9 @@ def _voiceprint_index_type(val: str) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="WeSpeaker 声纹注册与识别（官方 wespeaker 模型）")
+    parser.add_argument(
+        "--version", action="version", version=f"%(prog)s {_PKG_VERSION}",
+    )
     sub = parser.add_subparsers(dest="cmd")
 
     # ---- enroll ----
