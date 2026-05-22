@@ -137,7 +137,7 @@ class WespeakerDeep:
         use_cuda = device == "cuda" and torch.cuda.is_available()
         self._model = wespeaker.load_model(
             str(model_dir),
-            dtype="float16" if use_cuda else "float32",
+            dtype="float32",
         )
         if use_cuda:
             self._model.set_device("cuda")
