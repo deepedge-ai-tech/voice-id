@@ -55,6 +55,15 @@ class OnnxEngine:
         sample_rate: int = 16000,
     ) -> RecognitionResult
 
+    def enroll(
+        self,
+        audio_path: str | Path,
+        pk_path: str | Path = "voice.pkl",
+    ) -> dict:
+        """空桩 — 兼容旧代码，实际不执行注册（ONNX 引擎只做识别）。"""
+        logger.warning("OnnxEngine.enroll() is a no-op stub for compatibility; use WespeakerDeep for enrollment.")
+        return {"ok": False, "error": "enroll not supported by OnnxEngine"}
+
     @property
     def config(self) -> OnnxConfig
 ```
@@ -215,6 +224,6 @@ OnnxEngine(providers=[
 
 ## 不做的功能
 
-- 不保留 `enroll()` API（用外部脚本注册，ONNX 引擎只做识别）
+- `enroll()` 为空桩，返回 `{"ok": False}`，避免外部代码调用时报错
 - 不保留 `realtime_monitor` 对 PyTorch 的依赖
 - 不保留 `diagnostics` 和 `reporters`（它们是开发辅助工具）
