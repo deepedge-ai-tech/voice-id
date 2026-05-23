@@ -238,7 +238,7 @@ class WespeakerDeep:
 
     def recognize(
         self,
-        audio_path: str | Path,
+        audio_path: str | Path | np.ndarray,
         voiceprint: np.ndarray | str | Path | None = None,
     ) -> dict[str, Any]:
         """将音频与声纹比对，返回识别结果。
@@ -247,7 +247,7 @@ class WespeakerDeep:
         分数范围归一化为 [0, 1]（和 official-demo.py 一致）。
 
         Args:
-            audio_path: 待测试音频文件路径。
+            audio_path: 待测试音频文件路径，或 numpy PCM 数组。
             voiceprint: 声纹，可以是 numpy 数组 / .pkl 路径。
                 None 时使用内置声纹（由 package_pk_index 或默认 John 决定）。
 
@@ -255,6 +255,53 @@ class WespeakerDeep:
             {"is_recognized": bool, "confidence": float, "threshold": float}
             如果出错，额外包含 "error" 字段。
         """
+        # ---- 支持 numpy PCM 数组 ----
+        if isinstance(audio_path, np.ndarray):
+            pcm = audio_path
+            sr = 16000
+            if self._model is None:
+                self._model = self.setup_model()
+
+            pcm_tensor = torch.from_numpy(
+                pcm.astype(np.float32) / 32768.0 if pcm.dtype == np.int16 else pcm.astype(np.float32)
+            ).unsqueeze(0)
+
+            test_emb = self._model.extract_embedding_from_pcm(pcm_tensor, sr)
+            if test_emb is None:
+                return RecognitionResult(
+                    is_recognized=False, confidence=0.0, name="", all_scores=None
+                )
+
+            # ---- 加载参考声纹 ----
+            if voiceprint is None:
+                from ._voiceprints import get_voiceprint_path, get_voiceprint_name
+
+                index = (
+                    self._deep_config.package_pk_index
+                    if self._deep_config.package_pk_index is not None
+                    else 0
+                )
+                voiceprint = get_voiceprint_path(index)
+                speaker_name = get_voiceprint_name(index)
+            else:
+                speaker_name = ""
+
+            if isinstance(voiceprint, np.ndarray):
+                ref_emb = torch.from_numpy(voiceprint.astype(np.float32))
+            else:
+                ref_data = self.load(voiceprint)
+                ref_emb = torch.from_numpy(ref_data.astype(np.float32))
+
+            score = self._model.cosine_similarity(test_emb, ref_emb)
+
+            return RecognitionResult(
+                is_recognized=bool(score >= self._deep_config.sim_threshold),
+                confidence=round(float(score), 4),
+                name=speaker_name,
+                all_scores=None,
+            )
+
+        # ---- 文件路径路径 ----
         audio_path = str(Path(audio_path))
         if not Path(audio_path).is_file():
             return {
@@ -276,13 +323,9 @@ class WespeakerDeep:
 
         # ---- 加载声纹 ----
         if isinstance(voiceprint, np.ndarray):
-            import torch
-
             ref_emb = torch.from_numpy(voiceprint.astype(np.float32))
         else:
             ref_data = self.load(voiceprint)
-            import torch
-
             ref_emb = torch.from_numpy(ref_data.astype(np.float32))
 
         # ---- 提取测试音频 embedding ----

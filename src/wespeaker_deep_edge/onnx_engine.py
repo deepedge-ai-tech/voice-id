@@ -40,7 +40,7 @@ FFT_SIZE = 512
 WINDOW_LENGTH = int(0.025 * SAMPLE_RATE)  # 25 ms  → 400 samples
 HOP_LENGTH = int(0.010 * SAMPLE_RATE)     # 10 ms  → 160 samples
 LOW_FREQ = 20.0
-HIGH_FREQ = 7600.0  # nyquist - 400 for 16 kHz
+HIGH_FREQ = 8000.0   # nyquist for 16 kHz (matches Kaldi default)
 
 
 # --------------------------------------------------------------------------- #
@@ -92,63 +92,87 @@ def _mel_filterbank(
     fmin: float,
     fmax: float,
 ) -> np.ndarray:
-    """Create a Mel filter bank matrix of shape (n_mels, n_fft // 2 + 1)."""
-    # Mel points evenly spaced
+    """Create a Mel filter bank matrix matching torchaudio/Kaldi's approach.
+
+    For each FFT bin frequency we evaluate the triangular mel filter value,
+    rather than snapping to discrete bins.  This avoids degenerate (zero)
+    filters at low frequencies.
+    """
+    # Mel frequency range
     mel_min = _hz_to_mel(np.array(fmin))
     mel_max = _hz_to_mel(np.array(fmax))
-    mel_points = np.linspace(mel_min, mel_max, n_mels + 2)
-    hz_points = _mel_to_hz(mel_points)
 
-    # FFT bin frequencies
-    bins = np.floor((n_fft + 1) * hz_points / sr).astype(int)
+    # Center frequencies of each triangular filter (n_mels filters)
+    # Equally spaced in mel domain, Kaldi-style: / (n_mels + 1)
+    delta = (mel_max - mel_min) / (n_mels + 1)
+    left_mel = mel_min + np.arange(n_mels, dtype=np.float64) * delta
+    center_mel = mel_min + (np.arange(n_mels, dtype=np.float64) + 1.0) * delta
+    right_mel = mel_min + (np.arange(n_mels, dtype=np.float64) + 2.0) * delta
+
+    # FFT bin frequencies (Hz)  (n_fft // 2 + 1 bins)
     n_freqs = n_fft // 2 + 1
-    fbank = np.zeros((n_mels, n_freqs), dtype=np.float32)
+    fft_bin_width = sr / n_fft  # Hz per bin  (31.25 for 16-kHz / 512)
+    fft_freqs = np.arange(n_freqs, dtype=np.float64) * fft_bin_width
 
-    for i in range(n_mels):
-        left = bins[i]
-        center = bins[i + 1]
-        right = bins[i + 2]
+    # Convert to mel scale
+    mel_freqs = _hz_to_mel(fft_freqs)  # (n_freqs,)
 
-        # Ascending triangle
-        if left < center:
-            fbank[i, left:center] = np.linspace(0.0, 1.0, center - left, dtype=np.float32)
-        # Descending triangle
-        if center < right:
-            fbank[i, center:right] = np.linspace(1.0, 0.0, right - center, dtype=np.float32)
+    # Build filterbank via triangle evaluation  (n_mels, n_freqs)
+    left_mel = left_mel[:, np.newaxis]   # (n_mels, 1)
+    center_mel = center_mel[:, np.newaxis]
+    right_mel = right_mel[:, np.newaxis]
+    mel_freqs = mel_freqs[np.newaxis, :]  # (1, n_freqs)
 
-    return fbank
+    up_slope = (mel_freqs - left_mel) / (center_mel - left_mel)
+    down_slope = (right_mel - mel_freqs) / (right_mel - center_mel)
+
+    fbank = np.maximum(0.0, np.minimum(up_slope, down_slope))
+
+    return fbank.astype(np.float32)
 
 
 def _hamming_window(n: int) -> np.ndarray:
-    """Hamming window (Kaldi-compatible)."""
+    """Symmetric Hamming window matching torchaudio with ``periodic=False``."""
     return np.array([0.54 - 0.46 * np.cos(2.0 * np.pi * i / (n - 1)) for i in range(n)], dtype=np.float32)
 
 
 def compute_fbank(waveform: np.ndarray) -> np.ndarray:
-    """Compute 80-dim log-Mel FBANK features with CMN, shape (T, 80).
+    """Compute 80-dim log-Mel FBANK features, shape (T, 80).
+
+    Matches torchaudio's ``fbank`` with ``dither=0.0, preemph_coef=0.97,
+    window_type="hamming", remove_dc_offset=True``.
 
     Args:
         waveform: 1-D float32 array, 16 kHz.
 
     Returns:
         FBANK features shaped (T, 80), where T = number of frames.
+
+    Raises:
+        ValueError: If the waveform is too short to produce at least one
+            full frame.
     """
-    # Pre-emphasis (Kaldi default: 0.97)
-    # Actually Kaldi fbank does NOT apply pre-emphasis — skip it
-    # (the model's config has dither=1.0 but that's for training)
-
-    # Frame the signal
     n_samples = len(waveform)
-    n_frames = max(0, (n_samples - WINDOW_LENGTH) // HOP_LENGTH) + 1
-    if n_frames < 1:
-        return np.zeros((1, NUM_MEL_BINS), dtype=np.float32)
+    if n_samples < WINDOW_LENGTH:
+        raise ValueError("audio too short")
 
-    # Pre-allocate framed array
+    n_frames = (n_samples - WINDOW_LENGTH) // HOP_LENGTH + 1
+
+    # Pre-allocate framed array  (m, window_size)
     frames = np.zeros((n_frames, WINDOW_LENGTH), dtype=np.float32)
     for i in range(n_frames):
         start = i * HOP_LENGTH
-        end = start + WINDOW_LENGTH
-        frames[i] = waveform[start:end]
+        frames[i] = waveform[start:start + WINDOW_LENGTH]
+
+    # Per-frame DC offset removal  (torchaudio: before pre-emphasis)
+    row_means = frames.mean(axis=1, keepdims=True)
+    frames = frames - row_means
+
+    # Per-frame pre-emphasis with left-edge replicate
+    # y[j] = x[j] - 0.97 * (j==0 ? x[0] : x[j-1])
+    left_pad = frames[:, :1].copy()  # replicate first column
+    shifted = np.concatenate([left_pad, frames[:, :-1]], axis=1)
+    frames = frames - 0.97 * shifted
 
     # Apply Hamming window
     window = _hamming_window(WINDOW_LENGTH)
@@ -160,11 +184,8 @@ def compute_fbank(waveform: np.ndarray) -> np.ndarray:
     # Mel filter bank + log
     fbank = _mel_filterbank(FFT_SIZE, SAMPLE_RATE, NUM_MEL_BINS, LOW_FREQ, HIGH_FREQ)
     features = np.dot(mag_spec, fbank.T)  # (T, 80)
-    features = np.maximum(features, 1e-10)
+    features = np.maximum(features, np.finfo(np.float32).eps)
     features = np.log(features)
-
-    # CMN: subtract mean over time (match Kaldi)
-    features = features - np.mean(features, axis=0, keepdims=True)
 
     return features.astype(np.float32)
 
@@ -232,6 +253,7 @@ class OnnxEngine:
 
         Args:
             pcm: 1-D float32 array (values in [-1, 1]).
+                Multi-channel arrays are averaged to mono.
             sample_rate: Sample rate of *pcm*.  Will be resampled if
                 different from 16 kHz.
 
@@ -239,14 +261,18 @@ class OnnxEngine:
             256-d float32 embedding, or ``None`` if too short.
         """
         if pcm.ndim > 1:
-            pcm = pcm.squeeze()
+            # Average channels to mono
+            pcm = pcm.mean(axis=1)
 
         # Resample to 16 kHz if needed
         if sample_rate != SAMPLE_RATE:
             pcm = self._resample(pcm, sample_rate, SAMPLE_RATE)
 
         # Compute features
-        feats = compute_fbank(pcm)
+        try:
+            feats = compute_fbank(pcm)
+        except ValueError:
+            return None
         if feats.shape[0] < 1:
             return None
 
@@ -420,13 +446,14 @@ class OnnxEngine:
 
         Args:
             pcm: 1-D int16 or float32 PCM array.
+                Multi-channel arrays are averaged to mono.
             sample_rate: Sample rate.
 
         Returns:
             RecognitionResult with best match.
         """
         if pcm.ndim > 1:
-            pcm = pcm.squeeze()
+            pcm = pcm.mean(axis=1)
 
         # Normalize int16 → float32
         if pcm.dtype == np.int16:
