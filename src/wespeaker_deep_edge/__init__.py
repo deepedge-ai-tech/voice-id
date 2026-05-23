@@ -20,10 +20,13 @@ import logging
 logging.getLogger("wespeaker_deep_edge").addHandler(logging.NullHandler())
 
 from . import diagnostics, realtime_monitor, reporters
+from .onnx_engine import OnnxConfig, OnnxEngine
 from .wespeaker_deep_dege import DeepConfig, WespeakerDeep
 
 __all__ = [
     "DeepConfig",
+    "OnnxConfig",
+    "OnnxEngine",
     "WespeakerDeep",
     "realtime_monitor",
     "diagnostics",
