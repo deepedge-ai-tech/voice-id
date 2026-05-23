@@ -143,7 +143,7 @@ ls $(python3 -c "import tempfile; print(tempfile.gettempdir())")/wespeaker_debug
 
 ## 内置声纹
 
-7 人声纹已打包进 whl（`_voiceprints/`），CLI/Python API 均可使用。
+8 人声纹已打包进 whl（`_voiceprints/`），CLI/Python API 均可使用。
 
 | Index | Name         |
 |-------|--------------|
@@ -153,11 +153,34 @@ ls $(python3 -c "import tempfile; print(tempfile.gettempdir())")/wespeaker_debug
 | 3     | Qingqing     |
 | 4     | Xixi         |
 | 5     | Zhong        |
-| 6     | John_usb_yun |
+| 6     | Angle        |
+| 7     | Albert       |
 
 - CLI: `--package-pk-index <index>` 选择内置声纹，不传 `voiceprint` 时默认 John (index 0)
 - Python API: 设置 `client.package_pk_index` 或 `recognize()` 不传 `pk_path`
 - `package_pk_index` 优先级高于 `pk_path`
+
+## 添加内置声纹
+
+如需将新人声纹打包进 whl，按以下步骤操作：
+
+1. **注册声纹**：用 `WespeakerDeep` 将音频文件注册为 `.pkl`
+2. **放入 `_voiceprints/`**：按 `voice_<name>.pkl` 命名放入 `src/wespeaker_deep_edge/_voiceprints/`
+3. **更新注册表**：在 `src/wespeaker_deep_edge/_voiceprints/__init__.py` 中：
+   - `_PEOPLE` 列表追加 `<name>`（小写）
+   - 更新索引注释的数值范围
+4. **更新文档**：在 CLAUDE.md 内置声纹表格中添加对应行
+
+```bash
+# 注册声纹（使用 src. 路径避免版本冲突）
+uv run python -c "
+import sys; sys.path.insert(0, 'src')
+from wespeaker_deep_edge import WespeakerDeep
+client = WespeakerDeep()
+client.enroll('path/to/speaker.wav', 'src/wespeaker_deep_edge/_voiceprints/voice_name.pkl')
+print('Done')
+"
+```
 
 ## 核心 API
 

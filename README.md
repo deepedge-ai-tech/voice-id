@@ -17,30 +17,24 @@ WeSpeaker 声纹识别工具 — 独立的声纹注册与识别 CLI 工具。
 ### 从 PyPI（已发布）
 
 ```bash
-# 完整安装（含服务端推理）
+# 默认安装（仅包本身，不装任何依赖）
 pip install wespeaker-deep-edge
 
-# 仅安装客户端 SDK（轻量，无需 torch）
-pip install "wespeaker-deep-edge[client]"
-
-# 仅安装服务端
-pip install "wespeaker-deep-edge[server]"
+# 完整安装（含所有依赖）
+pip install "wespeaker-deep-edge[deps]"
 ```
 
 ### 从 GitHub 直接安装
 
 ```bash
-# 完整安装（最新 main 分支）
+# 默认安装（仅包本身，不装任何依赖）
 pip install git+https://github.com/deepedge-ai-tech/voice-id.git
 
-# 仅客户端 SDK
-pip install "wespeaker-deep-edge[client] @ git+https://github.com/deepedge-ai-tech/voice-id.git"
-
-# 仅服务端
-pip install "wespeaker-deep-edge[server] @ git+https://github.com/deepedge-ai-tech/voice-id.git"
+# 完整安装（含所有依赖）
+pip install "wespeaker-deep-edge[deps] @ git+https://github.com/deepedge-ai-tech/voice-id.git"
 
 # 指定版本 tag
-pip install git+https://github.com/deepedge-ai-tech/voice-id.git@v0.1.23
+pip install git+https://github.com/deepedge-ai-tech/voice-id.git@v0.1.25
 
 # 或使用 uv
 uv pip install git+https://github.com/deepedge-ai-tech/voice-id.git
@@ -51,7 +45,14 @@ uv pip install git+https://github.com/deepedge-ai-tech/voice-id.git
 ```bash
 git clone https://github.com/deepedge-ai-tech/voice-id.git
 cd voice-id
-pip install .
+pip install .           # 默认不装依赖
+pip install ".[deps]"   # 完整安装
+```
+
+### 查看版本
+
+```bash
+python -m wespeaker_deep_edge --version
 ```
 
 ## 快速开始
@@ -78,14 +79,16 @@ wespeaker-deep-edge recognize test.mp3 voice.pkl --package-pk-index 2   # Michae
 
 ### 内置声纹索引
 
-| Index | Name     |
-|-------|----------|
-| 0     | John     |
-| 1     | Frank    |
-| 2     | Michael  |
-| 3     | Qingqing |
-| 4     | Xixi     |
-| 5     | Zhong    |
+| Index | Name         |
+|-------|--------------|
+| 0     | John         |
+| 1     | Frank        |
+| 2     | Michael      |
+| 3     | Qingqing     |
+| 4     | Xixi         |
+| 5     | Zhong        |
+| 6     | Angle        |
+| 7     | Albert       |
 
 > 不传 `voiceprint` 参数时，默认使用 John (index 0) 的声纹。
 
@@ -111,34 +114,6 @@ result = recognizer2.recognize("test.wav")
 
 # 指定外部声纹文件
 result = recognizer.recognize("test.wav", "voice.pkl")
-```
-
-### WebSocket 服务端
-
-```bash
-# 启动服务
-wespeaker-deep-edge-server --port 10000 --storage-dir ./voiceprints
-```
-
-### WebSocket 客户端 SDK
-
-```python
-from wespeaker_deep_edge.client import SpeakerClient
-
-client = SpeakerClient("ws://localhost:10000")
-await client.connect()
-
-# 注册声纹
-await client.enroll("audio.wav", "user_001")
-
-# 加载模板（支持预设声纹 preset_* 和用户注册 ID）
-await client.load(["user_001", "preset_john", "preset_frank"])
-
-# 识别（矩阵批量 cosine similarity，返回最高分）
-result = await client.recognize("test.wav")
-print(f"识别结果: {result}")  # {"id": "preset_john", "score": 0.8523}
-
-await client.close()
 ```
 
 ## 最佳配置参数
@@ -180,7 +155,7 @@ Voice-ID/
 │   │   └── template_manager.py       #     多模板矩阵管理
 │   ├── client/                       #   WebSocket 客户端 SDK
 │   │   └── speaker_client.py         #     SpeakerClient
-│   ├── _voiceprints/                 #   内置声纹（8人）
+│   ├── _voiceprints/                 #   内置声纹（9人）
 │   ├── _models/                      #   内置模型
 │   └── _wespeaker/                   #   vendored 官方 WeSpeaker
 ├── tests/                            # 测试套件
@@ -195,11 +170,8 @@ Voice-ID/
 - torchaudio >= 2.8.0
 - numpy == 1.26.4
 - pyannote-audio >= 3.3.2
-- websockets >= 12.0（server/client）
 - silero-vad
 - audiomentations >= 0.43.1（可选）
-
-> client 安装仅需 websockets + numpy + soundfile，不含 torch。
 
 ## 开发
 

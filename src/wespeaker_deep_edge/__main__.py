@@ -6,6 +6,7 @@
 import argparse
 import logging
 import sys
+from importlib.metadata import version as _pkg_version
 from pathlib import Path
 
 from ._voiceprints import get_voiceprint_path, get_voiceprint_name
@@ -13,11 +14,13 @@ from .wespeaker_deep_dege import DeepConfig, WespeakerDeep
 
 logger = logging.getLogger(__name__)
 
+_PKG_VERSION = _pkg_version("wespeaker-deep-edge")
+
 
 def _voiceprint_index_type(val: str) -> int:
     idx = int(val)
     max_idx = len(
-        ["john", "frank", "michael", "qingqing", "xixi", "zhong", "john_usb_yun", "angle"]
+        ["john", "frank", "michael", "qingqing", "xixi", "zhong", "angle"]
     ) - 1
     if idx < 0 or idx > max_idx:
         raise argparse.ArgumentTypeError(f"索引范围 0-{max_idx}")
@@ -26,6 +29,9 @@ def _voiceprint_index_type(val: str) -> int:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="WeSpeaker 声纹注册与识别（官方 wespeaker 模型）")
+    parser.add_argument(
+        "--version", action="version", version=f"%(prog)s {_PKG_VERSION}",
+    )
     sub = parser.add_subparsers(dest="cmd")
 
     # ---- enroll ----
@@ -42,7 +48,7 @@ def main() -> None:
     )
     p_rec.add_argument(
         "--package-pk-index", type=_voiceprint_index_type, default=None,
-        help="内置声纹索引: 0=John 1=Frank 2=Michael 3=Qingqing 4=Xixi 5=Zhong 6=John_usb_yun 7=Angle",
+        help="内置声纹索引: 0=John 1=Frank 2=Michael 3=Qingqing 4=Xixi 5=Zhong 6=Angle 7=Albert",
     )
     p_rec.add_argument("--threshold", type=float, default=0.70, help="相似度阈值")
 
@@ -66,7 +72,7 @@ def main() -> None:
             f"threshold={r['threshold']}"
         )
     elif args.cmd == "list-voiceprints":
-        names = ["john", "frank", "michael", "qingqing", "xixi", "zhong", "john_usb_yun", "angle"]
+        names = ["john", "frank", "michael", "qingqing", "xixi", "zhong", "angle", "albert"]
         print("内置声纹列表:")
         for i, name in enumerate(names):
             print(f"  {i}: {name}  →  {get_voiceprint_path(i)}")
