@@ -21,13 +21,18 @@ logging.getLogger("wespeaker_deep_edge").addHandler(logging.NullHandler())
 
 from . import diagnostics, realtime_monitor, reporters
 from .onnx_engine import OnnxConfig, OnnxEngine
-from .wespeaker_deep_dege import DeepConfig, WespeakerDeep
+from .wespeaker_deep_dege import DeepConfig, WespeakerDeep as WespeakerDeepLegacy
+
+# WespeakerDeep 默认使用 ONNX Runtime 轻量版本。
+# 旧版 PyTorch 版本保留为 WespeakerDeepLegacy。
+WespeakerDeep = OnnxEngine
 
 __all__ = [
     "DeepConfig",
     "OnnxConfig",
     "OnnxEngine",
     "WespeakerDeep",
+    "WespeakerDeepLegacy",
     "realtime_monitor",
     "diagnostics",
     "reporters",
