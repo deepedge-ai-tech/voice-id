@@ -44,12 +44,12 @@ HIGH_FREQ = 8000.0   # nyquist for 16 kHz (matches Kaldi default)
 
 
 # --------------------------------------------------------------------------- #
-#  OnnxConfig
+#  DeepConfig
 # --------------------------------------------------------------------------- #
 
 
 @dataclass
-class OnnxConfig:
+class DeepConfig:
     """Configuration for OnnxEngine recognition behavior."""
     sim_threshold: float = 0.55
     enable_asnorm: bool = True
@@ -415,9 +415,9 @@ class OnnxEngine:
         return {"ok": False, "error": "enroll not supported by OnnxEngine"}
 
     @property
-    def config(self) -> OnnxConfig:
-        """Return current configuration as an OnnxConfig."""
-        return OnnxConfig(
+    def config(self) -> DeepConfig:
+        """Return current configuration as a DeepConfig."""
+        return DeepConfig(
             sim_threshold=self.sim_threshold,
             enable_asnorm=self.enable_asnorm,
             asnorm_threshold=self.asnorm_threshold,

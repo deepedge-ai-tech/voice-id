@@ -9,7 +9,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from src.wespeaker_deep_edge.onnx_engine import OnnxConfig, OnnxEngine, RecognitionResult, compute_fbank
+from src.wespeaker_deep_edge.onnx_engine import DeepConfig, OnnxEngine, RecognitionResult, compute_fbank
 from src.wespeaker_deep_edge.wespeaker_deep_dege import WespeakerDeep
 
 logger = logging.getLogger(__name__)
@@ -244,13 +244,13 @@ def test_enroll_stub(engine: OnnxEngine) -> None:
 
 
 # --------------------------------------------------------------------------- #
-#  test_onnx_config_dataclass
+#  test_deep_config_dataclass
 # --------------------------------------------------------------------------- #
 
 
 def test_onnx_config_dataclass() -> None:
-    """OnnxConfig has correct defaults and can be used to configure engine."""
-    cfg = OnnxConfig()
+    """DeepConfig has correct defaults and can be used to configure engine."""
+    cfg = DeepConfig()
     assert cfg.sim_threshold == 0.55
     assert cfg.enable_asnorm is True
     assert cfg.asnorm_threshold == 6.0
