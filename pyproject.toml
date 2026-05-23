@@ -18,7 +18,11 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Operating System :: OS Independent",
 ]
-dependencies = []
+dependencies = [
+    "numpy==1.26.4",
+    "scipy>=1.0",
+    "soundfile>=0.13.1",
+]
 
 [project.urls]
 Homepage = "https://github.com/yourusername/wespeaker-deep-edge"
@@ -59,6 +63,8 @@ deps = [
     "datasets",
     "huggingface-hub",
 ]
+cpu = ["onnxruntime"]
+gpu = ["onnxruntime-gpu"]
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
@@ -69,7 +75,7 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "wespeaker_deep_edge" = ["*.yaml", "*.yml", "*.json", "*.txt"]
-"wespeaker_deep_edge._models" = ["**/*"]
+"wespeaker_deep_edge._models" = ["**/*", "*.onnx"]
 "wespeaker_deep_edge._voiceprints" = ["**/*"]
 "wespeaker_deep_edge._wespeaker" = ["**/*"]
 "wespeaker_deep_edge._cohort" = ["**/*"]
