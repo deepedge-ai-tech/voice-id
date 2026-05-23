@@ -89,17 +89,26 @@ class OnnxConfig:
 | `src/wespeaker_deep_edge/__init__.py` | 修改 | 导出 OnnxEngine |
 | `scripts/export_onnx_model.py` | 新增 | 一次性 ONNX 导出（有 torch 环境跑） |
 | `src/wespeaker_deep_edge/_models/vblinkf/model.onnx` | 产物 | 导出的 ONNX 模型（提交 git） |
-| `pyproject.toml` | 修改 | 依赖变更 |
-| `tests/` | 新增/修改 | onnx_engine 测试 |
+| `pyproject.toml` | 修改 | 依赖变更 + package-data 添加 `*.onnx` |
+| `tests/test_onnx_engine.py` | 新增 | onnx_engine 测试 |
+
+## package-data 变更
+
+在现有基础上添加 `*.onnx`：
+
+```toml
+[tool.setuptools.package-data]
+"wespeaker_deep_edge._models" = ["**/*", "*.onnx"]
+```
 
 ## 依赖变更
 
 ```toml
 [project]
 dependencies = [
-    "numpy",
-    "scipy",        # FBANK + resample
-    "soundfile",    # 音频文件读写
+    "numpy==1.26.4",
+    "scipy>=1.0",        # FBANK + resample
+    "soundfile>=0.13.1", # 音频文件读写
 ]
 
 [project.optional-dependencies]
@@ -147,14 +156,36 @@ gpu = ["onnxruntime-gpu"]       # Jetson Orin (JetPack)
 
 ## 测试策略
 
-新建 `tests/test_onnx_engine.py`，覆盖：
+新建 `tests/test_onnx_engine.py`，自动运行验证 OnnxEngine 与 WespeakerDeep 结果一致。
 
-- `compute_fbank` 输出形状和数值范围正确
-- `extract_embedding` 输出维度 (256,) float32
-- `recognize_multi_pcm` 与现有 `WespeakerDeep` 结果 cosine sim 偏差 < 0.01
-- AS-Norm 打开/关闭分支
-- 短音频边界情况
-- 空模板报错
+### 验证标准
+
+| 检查项 | 标准 |
+|--------|------|
+| FBANK 特征与 torchaudio 版本差异 | MSE < 1e-4 |
+| 同一音频的 embedding cosine similarity | > 0.999 |
+| 同一音频的 recognize 结果 | is_recognized 一致，confidence 偏差 < 0.01 |
+| 多模板匹配结果 | 最佳匹配的 name 一致 |
+
+### 测试用例
+
+- `test_fbank_matches_torchaudio` — numpy FBANK vs torchaudio FBANK 逐帧对比
+- `test_embedding_pipeline` — 加载 ONNX，对测试音频提取 embedding，验证维度 (256,)
+- `test_recognize_consistency` — OnnxEngine vs WespeakerDeep，对 asset 测试音频做完整识别流程，cosine sim 偏差 < 0.01
+- `test_asnorm_on_off` — AS-Norm 启用/禁用分支
+- `test_short_audio` — < 25ms 音频触发 ValueError
+- `test_no_templates` — 未 load_templates 时触发 RuntimeError
+- `test_multiple_templates` — 多模板匹配返回正确的最佳 speaker
+
+### 自动化
+
+这些测试纳入现有 pytest 流程，运行方式不变：
+
+```bash
+uv run pytest tests/test_onnx_engine.py -v
+```
+
+CI 中自动执行，OnnxEngine 结果与 WespeakerDeep baseline 不一致时标记失败。
 
 ## 平台部署
 
