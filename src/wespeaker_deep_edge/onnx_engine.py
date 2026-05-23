@@ -191,6 +191,46 @@ def compute_fbank(waveform: np.ndarray) -> np.ndarray:
 
 
 # --------------------------------------------------------------------------- #
+#  Device helpers
+# --------------------------------------------------------------------------- #
+
+
+def _device_to_providers(device: str) -> list[str]:
+    """Convert a device string to ONNX Runtime provider list.
+
+    Args:
+        device: ``"cpu"``, ``"cuda"``, or ``"auto"``.
+
+    Returns:
+        Ordered list of ONNX Runtime execution providers.
+    """
+    device = device.strip().lower()
+
+    if device == "cpu":
+        return ["CPUExecutionProvider"]
+
+    available = ort.get_available_providers()
+
+    if device == "cuda":
+        if "CUDAExecutionProvider" in available:
+            return ["CUDAExecutionProvider", "CPUExecutionProvider"]
+        raise RuntimeError(
+            "device='cuda' requested but CUDAExecutionProvider is not available. "
+            f"Available providers: {available}"
+        )
+
+    if device == "auto":
+        preferred = [
+            "TensorrtExecutionProvider",
+            "CUDAExecutionProvider",
+            "CPUExecutionProvider",
+        ]
+        return [p for p in preferred if p in available]
+
+    raise ValueError(f"Unknown device: '{device}'. Expected 'cpu', 'cuda', or 'auto'.")
+
+
+# --------------------------------------------------------------------------- #
 #  OnnxEngine
 # --------------------------------------------------------------------------- #
 
@@ -211,6 +251,7 @@ class OnnxEngine:
         self,
         model_path: str | Path | None = None,
         providers: list[str] | None = None,
+        device: str | None = None,
     ) -> None:
         if model_path is None:
             model_path = Path(__file__).parent / "_models" / "vblinkf" / "model.onnx"
@@ -221,6 +262,10 @@ class OnnxEngine:
                 f"ONNX model not found at {model_path}. "
                 f"Run `uv run python scripts/export_onnx_model.py` first."
             )
+
+        # Resolve device → providers
+        if device is not None:
+            providers = _device_to_providers(device)
 
         so = ort.SessionOptions()
         so.inter_op_num_threads = 1
