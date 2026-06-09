@@ -13,12 +13,13 @@
     5      Zhong
     6      Angle
     7      Albert
+    8      John (Double Mic)
     =====  ============
 """
 
 from importlib import resources
 
-_PEOPLE: list[str] = ["john", "frank", "michael", "qingqing", "xixi", "zhong", "angle", "albert"]
+_PEOPLE: list[str] = ["john", "frank", "michael", "qingqing", "xixi", "zhong", "angle", "albert", "john_double_mic"]
 
 
 def get_voiceprint_path(index: int) -> str:
