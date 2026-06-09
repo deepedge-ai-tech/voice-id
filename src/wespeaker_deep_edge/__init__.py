@@ -19,11 +19,30 @@ import logging
 
 logging.getLogger("wespeaker_deep_edge").addHandler(logging.NullHandler())
 
-from . import diagnostics, realtime_monitor, reporters
-from .wespeaker_deep_dege import DeepConfig, WespeakerDeep
+from .onnx_engine import DeepConfig, OnnxEngine
+
+# WespeakerDeep 默认使用 ONNX Runtime 轻量版本。
+# diagnostics / realtime_monitor / reporters 需要 PyTorch，
+# 改为懒导入，不触发 import torch。
+WespeakerDeep = OnnxEngine
+
+
+def __getattr__(name: str):
+    import importlib
+
+    lazy: dict[str, str] = {
+        "diagnostics": "diagnostics",
+        "realtime_monitor": "realtime_monitor",
+        "reporters": "reporters",
+    }
+    if name in lazy:
+        mod = importlib.import_module(f".{lazy[name]}", __name__)
+        return getattr(mod, name)
+    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 __all__ = [
     "DeepConfig",
+    "OnnxEngine",
     "WespeakerDeep",
     "realtime_monitor",
     "diagnostics",
