@@ -1,7 +1,6 @@
-"""内置声纹包 — 打包到 whl 中的预注册声纹文件。
+"""内置声纹包 — 索引↔名称映射。
 
-索引映射：
-
+映射：
     =====  ============
     Index  Name
     =====  ============
@@ -13,48 +12,34 @@
     5      Zhong
     6      Angle
     7      Albert
-    8      John (Double Mic)
     =====  ============
 """
 
 from importlib import resources
 
-_PEOPLE: list[str] = ["john", "frank", "michael", "qingqing", "xixi", "zhong", "angle", "albert", "john_double_mic"]
+_PEOPLE: list[str] = [
+    "john",
+    "frank",
+    "michael",
+    "qingqing",
+    "xixi",
+    "zhong",
+    "angle",
+    "albert",
+]
 
 
 def get_voiceprint_path(index: int) -> str:
-    """返回第 index 个人的内置声纹 .pkl 文件绝对路径。
-
-    Args:
-        index: 声纹索引 (0-7).
-
-    Returns:
-        内置声纹文件路径。
-
-    Raises:
-        IndexError: index 超出范围。
-    """
     if index < 0 or index >= len(_PEOPLE):
         raise IndexError(
-            f"package_pk_index {index} 超出范围 (0-{len(_PEOPLE) - 1})"
+            f"package_pk_index {index} out of range (0-{len(_PEOPLE) - 1})"
         )
-    name = _PEOPLE[index]
-    return str(
-        resources.files("wespeaker_deep_edge._voiceprints") / f"voice_{name}.pkl"
-    )
+    return ""
 
 
 def get_voiceprint_name(index: int) -> str:
-    """返回第 index 个人的名字。
-
-    Args:
-        index: 声纹索引 (0-7).
-
-    Returns:
-        名字字符串。
-    """
     if index < 0 or index >= len(_PEOPLE):
         raise IndexError(
-            f"package_pk_index {index} 超出范围 (0-{len(_PEOPLE) - 1})"
+            f"package_pk_index {index} out of range (0-{len(_PEOPLE) - 1})"
         )
     return _PEOPLE[index]
