@@ -1,213 +1,177 @@
 # CLAUDE.md
 
-## 项目概述
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
-WeSpeaker 声纹识别工具 — 独立的声纹注册与识别 CLI 工具。
-基于 pyannote.audio 后端，支持从音频文件提取声纹 embedding 并保存为 `.pkl`，后续通过余弦相似度进行说话人验证。
+## Project Overview
 
-## 技术栈
+WeSpeaker Voice-ID HTTP Client — a lightweight `requests` + `soundfile` library wrapping the voice-id REST API for speaker enrollment and recognition.
 
-- **语言**: Python 3.10+
-- **包管理**: uv
-- **深度学习**: PyTorch, torchaudio
-- **声纹模型**: pyannote.audio (ResNet34)
-- **数值计算**: numpy
-- **噪声增强**: audiomentations (可选)
-- **测试**: pytest + pytest-cov
-- **格式化**: black + isort
+**No PyTorch, no ONNX Runtime, no local model.** All recognition is delegated to a remote voiceprint-api service (`voiceprint-api` project on port 8005).
 
-## 遵循规范
-
-本项目遵循公司 [Python 开发标准](../company-standards/)
-- **强制使用**: company-global-constraints（全局 Plan 约束）
-- **强制使用**: company-init（项目初始化约束）
-
-## 项目结构
+## Architecture
 
 ```
-wespeaker/
-├── src/wespeaker_deep_edge/       # 源代码
-│   ├── __init__.py
-│   ├── __main__.py                # CLI 入口
-│   ├── wespeaker.py               # WespeakerClient 核心类
-│   ├── best.py                    # WespeakerBest（旧方案，multi-SNR 噪声注入）
-│   ├── wespeaker_deep_dege.py     # WespeakerDeep（当前最优方案）
-│   ├── diagnostics.py             # 诊断工具
-│   ├── reporters.py               # 报告生成
-│   ├── realtime_monitor.py        # 实时监控
-│   └── _models/wespeaker/         # 内置预训练模型（打包进 whl）
-│       ├── pytorch_model.bin      # ResNet34 权重 (25MB)
-│       └── config.yaml            # 模型配置
-├── tests/                         # 测试
-│   ├── wespeaker/                 # WespeakerClient + Best 测试
-│   └── wespeaker_deep_edge/       # WespeakerDeep 测试
-├── scripts/                       # 可执行脚本
-│   ├── cross_test_merged.py       # 交叉测试（WespeakerDeep，验证最佳配置）
-│   ├── test_whl_isolated.sh       # whl 隔离环境测试（打包前必跑）
-│   ├── best_recognition.py        # 最佳配置注册与识别
-│   ├── split_registration.py      # 按静音间隔切分注册音频
-│   └── test_sliding_window.py     # 滑动窗口对比测试
-├── asset/                         # 音频素材（不提交到 git）
-├── models/                        # 符号链接 → HuggingFace 缓存（开发用，不打包）
-├── dist/                          # whl 产物（不提交到 git）
-├── pyproject.toml
-├── CLAUDE.md
-└── README.md
+Voice-ID/
+├── pyproject.toml                    # Dependencies: requests, soundfile
+├── src/wespeaker_deep_edge/          # ★ Main package
+│   ├── client.py                     #   WespeakerDeep class (HTTP client)
+│   ├── __init__.py                   #   Exports WespeakerDeep, RecognitionResult
+│   ├── __main__.py                   #   CLI (python -m wespeaker_deep_edge)
+│   └── _voiceprints/                 #   Speaker name index (8 people)
+├── tests/
+│   └── wespeaker_deep_edge/
+│       └── test_client.py            # Mocked HTTP tests
+├── docs/
+│   ├── voice-id.md                   # REST API reference
+│   └── superpowers/                  # Design specs & implementation plans
+└── asset_combine/                    # WAV files for voiceprint registration
 ```
 
-## 常用命令
+**Key classes:**
+- `WespeakerDeep(base_url, api_key)` — main client, async-free. Methods: `enroll()`, `recognize()`, `recognize_multi_pcm()`, `load_templates()`
+- `RecognitionResult` — NamedTuple with `is_recognized`, `confidence`, `name`
+
+**Architecture pattern:** The library sends audio files/PCM to `voiceprint-api` via REST, parses JSON responses, and returns backward-compatible dicts/NamedTuples.
+
+## Tech Stack
+
+- Python 3.10+, uv package management
+- `requests>=2.28` — HTTP client
+- `soundfile>=0.13` — PCM→WAV temp files for `recognize_multi_pcm()`
+- pytest 8+ for testing (mocked HTTP via `unittest.mock`)
+
+## Common Commands
 
 ```bash
-# 安装依赖
+# Install (no ML dependencies, fast)
 uv sync
 
-# 运行测试
+# Run all tests
 uv run pytest
 
-# 检查覆盖率
-uv run pytest --cov --cov-fail-under=80
+# Single test file
+uv run pytest tests/wespeaker_deep_edge/test_client.py -v
 
-# 代码格式化
+# Single test
+uv run pytest tests/wespeaker_deep_edge/test_client.py::test_enroll_success -v
+
+# Coverage (threshold 25%)
+uv run pytest --cov --cov-fail-under=25
+
+# Format
 uv run black . && uv run isort .
 
-# 提交前检查
-uv run pytest --cov && uv run black . && uv run isort .
+# Build wheel
+uv build --wheel
 
-# 构建 whl（含内置模型，打包前必须先跑单元测试 + 隔离测试）
-uv run pytest && bash scripts/test_whl_isolated.sh && uv build --wheel
+# Package for deployment (Docker/Jetson)
+tar -czf wespeaker-deep-edge-docker-v0.2.0.tar.gz \
+    --exclude="__pycache__" --exclude="*.pyc" \
+    src/wespeaker_deep_edge/ pyproject.toml README.md
 
-# 隔离环境测试（安装 whl → 全套验证，支持传入素材目录）
-bash scripts/test_whl_isolated.sh [asset_dir]
-
-# 注册声纹
-uv run python -m wespeaker_deep_edge.wespeaker enroll audio.wav voice.pkl
-
-# 识别声纹（不传 voiceprint 默认用内置 John 声纹）
-uv run python -m wespeaker_deep_edge.wespeaker recognize audio.wav
-
-# 识别声纹（指定内置声纹 index）
-uv run python -m wespeaker_deep_edge.wespeaker recognize audio.wav --package-pk-index 1  # Frank
-
-# 识别声纹（指定外部文件）
-uv run python -m wespeaker_deep_edge.wespeaker recognize audio.wav voice.pkl
-
-# 切分注册音频
-uv run python scripts/split_registration.py asset/john/注册.aif asset/john/registration_segments
-
-# 滑动窗口测试
-uv run python scripts/test_sliding_window.py
-
-# 最佳配置注册与识别
-uv run python scripts/best_recognition.py enroll \
-    --clean asset/john/registration_segments/ \
-    --noise asset/john/test_noise_segments/嘈杂环境测试.m4a \
-    --output asset/john/voice_best.pkl
-uv run python scripts/best_recognition.py recognize \
-    --audio asset/john/test_clean_segments/安静环境测试测试.m4a \
-    --voiceprint asset/john/voice_best.pkl
-
-# 实时声纹监控
-uv run python -m wespeaker.realtime_monitor --voiceprint asset/john/voice_best.pkl
-uv run python -m wespeaker.realtime_monitor --list-devices
+# Install tar on remote
+pip install --no-deps wespeaker-deep-edge-docker-v0.2.0.tar.gz
 ```
 
-## 最佳配置（18 轮实验验证 + cross_test_merged.py 交叉测试确认）
+## Environment Variables
 
-全部为 `WespeakerDeep` / `DeepConfig` 默认值，无需额外设置。
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `VOICE_ID_URL` | `http://192.168.5.9:8005` | voice-id API server |
+| `VOICE_ID_KEY` | `""` | API Bearer token |
 
-| 参数 | 值 | 说明 |
-|------|------|------|
-| sim_threshold | **0.50** | 余弦相似度阈值 |
-| verify_crop_mode | head_window | 超长音频保留头部 |
-| verify_buffer_keep_secs | 60.0 | 不截断音频 |
-| enable_vad | False | 完整音频得分更高 |
-| enable_score_compensation | True | sqrt 补偿短音频分数 |
-| enroll_skip_vad | True | 注册跳过 VAD |
-| enroll_clean_only | True | 纯干净注册，不注入噪声 |
-| enable_multi_template | True | 多模板匹配（取 max） |
-| enable_sliding_window_test | False | 短音频滑动窗口（默认关闭） |
-
-**注册流程**: 纯净注册 → 每文件独立 embedding → 多模板保存
-**识别流程**: 多模板 max 匹配 → sqrt 分数补偿 → 短音频自动提分
-
-## 调试音频自动保存
-
-每次 `recognize()` 调用时，输入的音频会自动保存到系统临时目录的 `wespeaker_debug/` 文件夹：
+## CLI Usage
 
 ```bash
-# 查看保存位置
-ls $(python3 -c "import tempfile; print(tempfile.gettempdir())")/wespeaker_debug/
+# Register a speaker (calls POST /voiceprint/register)
+uv run python -m wespeaker_deep_edge enroll john audio.wav
+
+# Recognize (default: compare against index 0 = john)
+uv run python -m wespeaker_deep_edge recognize test.wav
+
+# Recognize with specific candidates
+uv run python -m wespeaker_deep_edge recognize test.wav "john,frank,albert"
+
+# List built-in speakers
+uv run python -m wespeaker_deep_edge list-voiceprints
+
+# Specify URL and key inline
+uv run python -m wespeaker_deep_edge --url http://10.0.0.1:8005 --key my-token recognize test.wav
 ```
 
-文件名格式: `{日期时间}-{置信度}.wav`，无需任何环境变量。
+## Python API
 
-## 内置声纹
+```python
+from wespeaker_deep_edge import WespeakerDeep, RecognitionResult
 
-9 人声纹已打包进 whl（`_voiceprints/`），CLI/Python API 均可使用。
+client = WespeakerDeep(base_url="http://192.168.5.9:8005", api_key="your-key")
+client.enroll("speaker.wav", "voice_john.pkl")
 
-| Index | Name              |
-|-------|-------------------|
-| 0     | John              |
-| 1     | Frank             |
-| 2     | Michael           |
-| 3     | Qingqing          |
-| 4     | Xixi              |
-| 5     | Zhong             |
-| 6     | Angle             |
-| 7     | Albert            |
-| 8     | John (Double Mic) |
+client.load_templates(indices=[0, 1, 2])
+result = client.recognize("test.wav")
+# → {"is_recognized": True, "confidence": 0.85, "threshold": 0.2}
 
-- CLI: `--package-pk-index <index>` 选择内置声纹，不传 `voiceprint` 时默认 John (index 0)
-- Python API: 设置 `client.package_pk_index` 或 `recognize()` 不传 `pk_path`
-- `package_pk_index` 优先级高于 `pk_path`
+result2 = client.recognize_multi_pcm(pcm_array, sample_rate=16000)
+# → RecognitionResult(is_recognized=True, confidence=0.85, name="john")
+```
 
-## 添加内置声纹
+## Built-in Voiceprint Index
 
-如需将新人声纹打包进 whl，按以下步骤操作：
+| Index | speaker_id |
+|-------|-----------|
+| 0 | john |
+| 1 | frank |
+| 2 | michael |
+| 3 | qingqing |
+| 4 | xixi |
+| 5 | zhong |
+| 6 | angle |
+| 7 | albert |
 
-1. **注册声纹**：用 `WespeakerDeep` 将音频文件注册为 `.pkl`
-2. **放入 `_voiceprints/`**：按 `voice_<name>.pkl` 命名放入 `src/wespeaker_deep_edge/_voiceprints/`
-3. **更新注册表**：在 `src/wespeaker_deep_edge/_voiceprints/__init__.py` 中：
-   - `_PEOPLE` 列表追加 `<name>`（小写）
-   - 更新索引注释的数值范围
-4. **更新文档**：在 CLAUDE.md 内置声纹表格中添加对应行
+## REST API (voiceprint-api)
+
+See `docs/voice-id.md` for full API reference. Key endpoints:
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| POST | `/voiceprint/register` | Register (multipart: speaker_id + file) |
+| POST | `/voiceprint/identify` | Identify (multipart: speaker_ids + file) |
+| GET | `/voiceprint/health?key=<token>` | Health check |
+| DELETE | `/voiceprint/{speaker_id}` | Delete voiceprint |
+
+## Deployment
+
+The library is deployed as a tar to Jetson (192.168.5.10) and installed in conda envs:
 
 ```bash
-# 注册声纹（使用 src. 路径避免版本冲突）
-uv run python -c "
-import sys; sys.path.insert(0, 'src')
-from wespeaker_deep_edge import WespeakerDeep
-client = WespeakerDeep()
-client.enroll('path/to/speaker.wav', 'src/wespeaker_deep_edge/_voiceprints/voice_name.pkl')
-print('Done')
-"
+scp wespeaker-deep-edge-docker-v0.2.0.tar.gz jetson@192.168.5.10:/tmp/
+ssh jetson@192.168.5.10
+source /home/jetson/miniforge3/etc/profile.d/conda.sh
+conda activate voice-id-02
+pip install --no-deps /tmp/wespeaker-deep-edge-docker-v0.2.0.tar.gz
 ```
 
-## 核心 API
+## Testing Strategy
 
-| 方法 | 说明 |
-|------|------|
-| `WespeakerClient().enroll(audio_path, pk_path)` | 注册声纹，提取 embedding 并保存到 .pkl |
-| `WespeakerClient().recognize(audio_path, pk_path=None)` | 比对音频与参考声纹，返回识别结果和置信度。**pk_path=None 时使用内置声纹**。调试音频自动保存 |
+Tests use `unittest.mock.patch` to intercept HTTP calls — no real API server needed:
 
-## 强制检查清单
+```python
+@patch("wespeaker_deep_edge.client.requests.post")
+def test_recognize_success(mock_post, client):
+    mock_post.return_value.json.return_value = {"speaker_id": "john", "score": 0.85}
+    result = client.recognize("test.wav")
+    assert result["is_recognized"] is True
+```
 
-每个任务完成后必须验证：
-- [ ] 代码符合命名规范（文件名 kebab-case，函数/变量 snake_case，类 PascalCase）
-- [ ] 函数包含类型注解和 docstring
-- [ ] 测试已编写或更新，pytest 全部通过
-- [ ] 测试覆盖率 ≥ 30%（pyproject.toml 阈值）
-- [ ] 代码已格式化（black + isort）
-- [ ] 不使用 print()（使用 logging）
-- [ ] 不使用裸 except
+## API Method Signatures
 
-## 发布流程
+- `WespeakerDeep(base_url=None, api_key=None)` — env var fallbacks
+- `enroll(audio_path, pk_path="voice.pkl")` → `{"ok": bool, "msg": str}`
+- `recognize(audio_path, voiceprint=None)` → `{"is_recognized": bool, "confidence": float, "threshold": float}`
+- `recognize_multi_pcm(pcm, sample_rate=16000)` → `RecognitionResult`
+- `load_templates(indices=None, files=None)` → caches speaker IDs internally
 
-**顺序执行，任何一步失败则停止：**
+## Version History
 
-1. **单元测试**: `uv run pytest`
-2. **隔离测试**: `bash scripts/test_whl_isolated.sh`
-3. **构建 whl**: `uv build --wheel`
-4. **打 tag 并推送**: `git tag v0.1.x && git push origin v0.1.x`
-
-隔离测试会创建独立 venv → 安装 whl → 验证模型加载、embedding 提取、注册+识别全流程，以及真实素材批量测试（13/16 通过基准）。
+- **0.2.0** — HTTP client refactor (current). Pure API client, no ML deps.
+- 0.1.x — Legacy ONNX + PyTorch dual engine (deleted).

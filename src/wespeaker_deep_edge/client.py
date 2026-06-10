@@ -169,7 +169,7 @@ class WespeakerDeep:
             return {
                 "is_recognized": bool(speaker_id),
                 "confidence": round(score, 4),
-                "threshold": 0.2,
+                "threshold": 0.45,
             }
         except requests.HTTPError as exc:
             raise RuntimeError(

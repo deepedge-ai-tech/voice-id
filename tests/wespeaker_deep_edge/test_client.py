@@ -144,7 +144,7 @@ def test_recognize_success(mock_post, client, mock_response, tmp_path):
 
     assert result["is_recognized"] is True
     assert result["confidence"] == 0.85
-    assert result["threshold"] == 0.2
+    assert result["threshold"] == 0.45
 
 
 @patch("src.wespeaker_deep_edge.client.requests.post")
@@ -161,7 +161,7 @@ def test_recognize_no_match(mock_post, client, mock_response, tmp_path):
     result = client.recognize(str(audio_file))
 
     assert result["is_recognized"] is False
-    assert result["threshold"] == 0.2
+    assert result["threshold"] == 0.45
 
 
 @patch("src.wespeaker_deep_edge.client.requests.post")
@@ -196,7 +196,7 @@ def test_recognize_with_voiceprint_path(mock_post, client, mock_response, tmp_pa
 
     assert result["is_recognized"] is True
     assert result["confidence"] == 0.75
-    assert result["threshold"] == 0.2
+    assert result["threshold"] == 0.45
 
 
 # --------------------------------------------------------------------------- #
