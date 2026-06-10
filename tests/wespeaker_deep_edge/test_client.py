@@ -47,7 +47,7 @@ def mock_response():
 def test_default_constructor():
     """Default constructor uses env var fallback values."""
     client = WespeakerDeep()
-    assert client.base_url == "http://127.0.0.1:8005"
+    assert client.base_url == "http://192.168.5.9:8005"
     assert client.api_key == ""
 
 

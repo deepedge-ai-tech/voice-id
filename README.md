@@ -54,7 +54,7 @@ python -m wespeaker_deep_edge --version
 
 | 变量 | 默认值 | 说明 |
 |------|--------|------|
-| `VOICE_ID_URL` | `http://127.0.0.1:8005` | 声纹识别服务地址 |
+| `VOICE_ID_URL` | `http://192.168.5.9:8005` | 声纹识别服务地址 |
 | `VOICE_ID_KEY` | `""` | API 认证密钥 |
 
 ### 命令行使用
@@ -156,7 +156,7 @@ import os
 from wespeaker_deep_edge import WespeakerDeep
 
 client = WespeakerDeep(
-    base_url=os.getenv("VOICE_ID_URL", "http://127.0.0.1:8005"),
+    base_url=os.getenv("VOICE_ID_URL", "http://192.168.5.9:8005"),
     api_key=os.getenv("VOICE_ID_KEY", ""),
 )
 ```

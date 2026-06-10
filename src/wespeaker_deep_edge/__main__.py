@@ -24,7 +24,7 @@ def main() -> None:
     )
     parser.add_argument(
         "--url", default=None,
-        help="voice-id API base URL (default: $VOICE_ID_URL or http://127.0.0.1:8005)",
+        help="voice-id API base URL (default: $VOICE_ID_URL or http://192.168.5.9:8005)",
     )
     parser.add_argument(
         "--key", default=None,

@@ -8,7 +8,7 @@ Usage::
     from wespeaker_deep_edge import WespeakerDeep
 
     client = WespeakerDeep(
-        base_url="http://127.0.0.1:8005",
+        base_url="http://192.168.5.9:8005",
         api_key="your-api-key",
     )
     client.enroll("audio.wav", "voice_john.pkl")
@@ -60,7 +60,7 @@ class WespeakerDeep:
 
     Args:
         base_url: The voice-id service URL. Falls back to ``VOICE_ID_URL``
-            env var, then ``http://127.0.0.1:8005``.
+            env var, then ``http://192.168.5.9:8005``.
         api_key: API authentication token. Falls back to ``VOICE_ID_KEY``
             env var, then empty string.
     """
@@ -70,7 +70,7 @@ class WespeakerDeep:
         base_url: str | None = None,
         api_key: str | None = None,
     ) -> None:
-        self.base_url = (base_url or os.getenv("VOICE_ID_URL", "http://127.0.0.1:8005")).rstrip("/")
+        self.base_url = (base_url or os.getenv("VOICE_ID_URL", "http://192.168.5.9:8005")).rstrip("/")
         self.api_key = api_key or os.getenv("VOICE_ID_KEY", "")
         self._speaker_ids: list[str] = []
 
