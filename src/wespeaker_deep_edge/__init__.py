@@ -1,4 +1,7 @@
-"""WeSpeaker 声纹识别工具 — 使用官方 wespeaker SimAM_ResNet34_ASP。
+"""WeSpeaker 声纹识别工具 — HTTP client for voice-id REST API.
+
+No PyTorch or ONNX Runtime dependencies. All recognition is delegated to
+the voice-id service (voiceprint-api) via HTTP.
 
 日志配置（导入后使用方自行控制）::
 
@@ -19,32 +22,9 @@ import logging
 
 logging.getLogger("wespeaker_deep_edge").addHandler(logging.NullHandler())
 
-from .onnx_engine import DeepConfig, OnnxEngine
-
-# WespeakerDeep 默认使用 ONNX Runtime 轻量版本。
-# diagnostics / realtime_monitor / reporters 需要 PyTorch，
-# 改为懒导入，不触发 import torch。
-WespeakerDeep = OnnxEngine
-
-
-def __getattr__(name: str):
-    import importlib
-
-    lazy: dict[str, str] = {
-        "diagnostics": "diagnostics",
-        "realtime_monitor": "realtime_monitor",
-        "reporters": "reporters",
-    }
-    if name in lazy:
-        mod = importlib.import_module(f".{lazy[name]}", __name__)
-        return getattr(mod, name)
-    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
+from .client import WespeakerDeep, RecognitionResult  # noqa: E402
 
 __all__ = [
-    "DeepConfig",
-    "OnnxEngine",
     "WespeakerDeep",
-    "realtime_monitor",
-    "diagnostics",
-    "reporters",
+    "RecognitionResult",
 ]
