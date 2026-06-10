@@ -1,7 +1,7 @@
 [project]
 name = "wespeaker-deep-edge"
-version = "0.1.29"
-description = "WeSpeaker 声纹识别工具 — 独立的声纹注册与识别 CLI 工具"
+version = "0.2.0"
+description = "WeSpeaker Voice-ID HTTP client — speaker verification via remote API"
 readme = "README.md"
 license = "MIT"
 requires-python = ">=3.10"
@@ -19,9 +19,8 @@ classifiers = [
     "Operating System :: OS Independent",
 ]
 dependencies = [
-    "numpy==1.26.4",
-    "scipy>=1.0",
-    "soundfile>=0.13.1",
+    "requests>=2.28",
+    "soundfile>=0.13",
 ]
 
 [project.urls]
@@ -31,40 +30,6 @@ Repository = "https://github.com/yourusername/wespeaker-deep-edge"
 "Bug Tracker" = "https://github.com/yourusername/wespeaker-deep-edge/issues"
 
 [project.scripts]
-# 通过 `python -m wespeaker_deep_edge` 调用
-# 直接 CLI 入口（查看版本用 `--version`）
-
-[project.optional-dependencies]
-deps = [
-    "audiomentations>=0.43.1",
-    "hdbscan>=0.8.40",
-    "kaldiio",
-    "numpy==1.26.4",
-    "pyannote-audio>=3.3.2",
-    "pydub>=0.25.0",
-    "pyyaml==6.0.3",
-    "scipy>=1.0",
-    "silero-vad",
-    "sounddevice==0.5.2",
-    "soundfile>=0.13.1",
-    "s3prl",
-    "tqdm",
-    "torch==2.8.0",
-    "torchaudio==2.8.0",
-    "umap-learn==0.5.6",
-    # wespeaker 内置依赖（vendored _wespeaker/）
-    "accelerate",
-    "onnxruntime>=1.16.0,<2.0",
-    "openai-whisper",
-    "peft",
-    "scikit-learn",
-    "seaborn>=0.13.2",
-    "matplotlib>=3.10.9",
-    "datasets",
-    "huggingface-hub",
-]
-cpu = ["onnxruntime"]
-gpu = ["onnxruntime-gpu"]
 
 [build-system]
 requires = ["setuptools>=61.0", "wheel"]
@@ -75,10 +40,6 @@ where = ["src"]
 
 [tool.setuptools.package-data]
 "wespeaker_deep_edge" = ["*.yaml", "*.yml", "*.json", "*.txt"]
-"wespeaker_deep_edge._models" = ["**/*", "*.onnx"]
-"wespeaker_deep_edge._voiceprints" = ["**/*"]
-"wespeaker_deep_edge._wespeaker" = ["**/*"]
-"wespeaker_deep_edge._cohort" = ["**/*"]
 
 [dependency-groups]
 dev = [
