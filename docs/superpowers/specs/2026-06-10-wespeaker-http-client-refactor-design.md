@@ -142,7 +142,7 @@ is_recognized = bool(result["speaker_id"])
 
 ```python
 _PEOPLE = [
-    "john",             # 0
+    "john",             # 0  (John 和 John-double-mic 合并为同一人)
     "frank",            # 1
     "michael",          # 2
     "qingqing",         # 3
@@ -150,17 +150,19 @@ _PEOPLE = [
     "zhong",            # 5
     "angle",            # 6
     "albert",           # 7
-    "john_double_mic",  # 8
 ]
 ```
 
+John-double-mic 与 John 是同一人在不同录音条件下的音频，合并为一个 `speaker_id`（john）。
+注册时用 `John-double-mic.wav`（更长，13.7MB，包含更多语音特征变化）。
+
 ## 声纹重新注册
 
-使用 `asset_combine/` 下的 WAV 文件注册所有 9 人：
+使用 `asset_combine/` 下的 WAV 文件注册所有 8 人：
 
 | Index | speaker_id | 音频文件 |
 |-------|-----------|---------|
-| 0 | john | asset_combine/John.wav |
+| 0 | john | asset_combine/John-double-mic.wav |
 | 1 | frank | asset_combine/Frank.wav |
 | 2 | michael | asset_combine/Michael.wav |
 | 3 | qingqing | asset_combine/Qingqing.wav |
@@ -168,7 +170,6 @@ _PEOPLE = [
 | 5 | zhong | asset_combine/Zhong.wav |
 | 6 | angle | asset_combine/angle.wav |
 | 7 | albert | asset_combine/Albert.wav |
-| 8 | john_double_mic | asset_combine/John-double-mic.wav |
 
 注册前先删除服务端上已有的旧声纹。
 
