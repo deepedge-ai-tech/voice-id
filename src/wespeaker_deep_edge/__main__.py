@@ -65,7 +65,7 @@ def main() -> None:
             client.load_templates(indices=[0])
         r = client.recognize(args.audio)
         status = "✅ 识别成功" if r["is_recognized"] else "❌ 未识别"
-        print(f"{status}  name={r['name']}  confidence={r['confidence']:.4f}")
+        print(f"{status}  confidence={r['confidence']:.4f}  threshold={r['threshold']}")
 
     elif args.cmd == "list-voiceprints":
         from ._voiceprints import _PEOPLE

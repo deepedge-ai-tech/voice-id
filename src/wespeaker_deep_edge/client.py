@@ -137,17 +137,21 @@ class WespeakerDeep:
 
         Args:
             audio_path: Path to a WAV file.
-            voiceprint: Ignored for HTTP client (kept for API compat).
-                The speaker ID list from ``load_templates()`` is used
-                as candidates.
+            voiceprint: If provided, compare against this single speaker.
+                Can be a ``.pkl`` path (``voice_john.pkl`` → ``"john"``)
+                or ``None`` to use templates loaded via ``load_templates()``.
 
         Returns:
-            ``{"is_recognized": bool, "confidence": float, "name": str}``
+            ``{"is_recognized": bool, "confidence": float, "threshold": float}``
+            matching the original WespeakerDeep return format.
 
         Raises:
             RuntimeError: If the API request fails.
         """
-        speaker_ids = self._speaker_ids or ["john"]
+        if voiceprint is not None and isinstance(voiceprint, (str, Path)):
+            speaker_ids = [self._resolve_speaker_id(audio_path, voiceprint)]
+        else:
+            speaker_ids = self._speaker_ids or ["john"]
 
         with open(audio_path, "rb") as f:
             resp = requests.post(
@@ -161,11 +165,11 @@ class WespeakerDeep:
             resp.raise_for_status()
             result = resp.json()
             speaker_id = result.get("speaker_id", "")
-            score = result.get("score", 0.0)
+            score = float(result.get("score", 0.0))
             return {
                 "is_recognized": bool(speaker_id),
-                "confidence": float(score),
-                "name": speaker_id,
+                "confidence": round(score, 4),
+                "threshold": 0.2,
             }
         except requests.HTTPError as exc:
             raise RuntimeError(
@@ -187,23 +191,35 @@ class WespeakerDeep:
             sample_rate: Sample rate of the PCM data.
 
         Returns:
-            RecognitionResult with the best match.
+            RecognitionResult with the best match (name from API response).
 
         Raises:
             RuntimeError: If the API request fails.
         """
+        speaker_ids = self._speaker_ids or ["john"]
+
         with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
             tmp_path = tmp.name
             try:
                 sf.write(tmp_path, pcm, sample_rate)
-                result = self.recognize(tmp_path)
+                with open(tmp_path, "rb") as f:
+                    resp = requests.post(
+                        f"{self.base_url}/voiceprint/identify",
+                        headers=self._auth_headers,
+                        files={"file": ("audio.wav", f, "audio/wav")},
+                        data={"speaker_ids": ",".join(speaker_ids)},
+                    )
+                resp.raise_for_status()
+                api_result = resp.json()
             finally:
                 os.unlink(tmp_path)
 
+        speaker_id = api_result.get("speaker_id", "")
+        score = float(api_result.get("score", 0.0))
         return RecognitionResult(
-            is_recognized=result["is_recognized"],
-            confidence=result["confidence"],
-            name=result["name"],
+            is_recognized=bool(speaker_id),
+            confidence=round(score, 4),
+            name=speaker_id,
         )
 
     # ------------------------------------------------------------------ #

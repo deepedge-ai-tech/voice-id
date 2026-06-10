@@ -143,8 +143,8 @@ def test_recognize_success(mock_post, client, mock_response, tmp_path):
     result = client.recognize(str(audio_file))
 
     assert result["is_recognized"] is True
-    assert result["name"] == "john"
     assert result["confidence"] == 0.85
+    assert result["threshold"] == 0.2
 
 
 @patch("src.wespeaker_deep_edge.client.requests.post")
@@ -161,7 +161,7 @@ def test_recognize_no_match(mock_post, client, mock_response, tmp_path):
     result = client.recognize(str(audio_file))
 
     assert result["is_recognized"] is False
-    assert result["name"] == ""
+    assert result["threshold"] == 0.2
 
 
 @patch("src.wespeaker_deep_edge.client.requests.post")
@@ -179,6 +179,24 @@ def test_recognize_http_error(mock_post, client, mock_response, tmp_path):
 
     with pytest.raises(RuntimeError, match="identify failed"):
         client.recognize(str(audio_file))
+
+
+@patch("src.wespeaker_deep_edge.client.requests.post")
+def test_recognize_with_voiceprint_path(mock_post, client, mock_response, tmp_path):
+    """recognize with a voiceprint path compares only against that speaker."""
+    mock_post.return_value = mock_response(
+        200, {"speaker_id": "frank", "score": 0.75}
+    )
+
+    client.load_templates(indices=[0])  # has john cached, but voiceprint arg should override
+    audio_file = tmp_path / "test.wav"
+    audio_file.write_bytes(b"fake-wav-content")
+
+    result = client.recognize(str(audio_file), "voice_frank.pkl")
+
+    assert result["is_recognized"] is True
+    assert result["confidence"] == 0.75
+    assert result["threshold"] == 0.2
 
 
 # --------------------------------------------------------------------------- #
